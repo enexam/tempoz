@@ -6,10 +6,15 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.tempoz.data.TempozDatabase
+import com.example.tempoz.data.TrackEntity
+import com.example.tempoz.data.TrackRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -26,6 +31,7 @@ enum class PlaybackState { STOPPED, PLAYING, PAUSED }
 class PlaybackViewModel(application: Application) : AndroidViewModel(application) {
 
     private val engine = AudioEngine()
+    private val repository = TrackRepository(TempozDatabase.getInstance(application).trackDao())
 
     init {
         engine.create()
@@ -41,12 +47,20 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private val _playbackState = MutableStateFlow(PlaybackState.STOPPED)
     val playbackState: StateFlow<PlaybackState> = _playbackState
 
+    /** Reactive list of all persisted tracks ordered by last used time. */
+    val tracks: StateFlow<List<TrackEntity>> = repository.tracks
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Tracks the URI of the most recently loaded file for upsert in [play]. */
+    private var currentTrackUri: Uri? = null
+
     /** Nullable job for the 250 ms EOF-detection polling loop. Active only when PLAYING. */
     private var pollJob: Job? = null
 
     /**
      * Opens [uri] via the content resolver, loads the file into the audio engine, and updates
      * [fileUri] and [fileName]. If the file length cannot be determined, the load is skipped.
+     * Upserts a [TrackEntity] to persist the track with the current BPM and beats per bar.
      */
     fun selectFile(context: Context, uri: Uri) {
         val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return
@@ -74,16 +88,44 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         engine.loadFile(pfd.fd, 0L, length)
         pfd.close()
         fileUri.value = uri
-        fileName.value = displayName ?: uri.lastPathSegment ?: "Unknown"
+        val name = displayName ?: uri.lastPathSegment ?: "Unknown"
+        fileName.value = name
+        currentTrackUri = uri
+        viewModelScope.launch {
+            repository.upsert(
+                TrackEntity(
+                    uri = uri.toString(),
+                    displayName = name,
+                    bpm = bpm.value,
+                    beatsPerBar = beatsPerBar.value,
+                    lastUsedMs = System.currentTimeMillis()
+                )
+            )
+        }
     }
 
     /**
      * Starts playback from the current position. No-op if no file has been loaded or if the
-     * engine is not STOPPED. Applies the current [bpm] and [beatsPerBar] before starting.
+     * engine is not STOPPED. Applies the current [bpm] and [beatsPerBar] before starting and
+     * upserts the current track to update its BPM/beatsPerBar/lastUsedMs.
      */
     fun play() {
         if (fileUri.value == null) return
         if (_playbackState.value != PlaybackState.STOPPED) return
+        val uri = currentTrackUri
+        if (uri != null) {
+            viewModelScope.launch {
+                repository.upsert(
+                    TrackEntity(
+                        uri = uri.toString(),
+                        displayName = fileName.value,
+                        bpm = bpm.value,
+                        beatsPerBar = beatsPerBar.value,
+                        lastUsedMs = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
         engine.bpm = bpm.value
         engine.beatsPerBar = beatsPerBar.value
         engine.start()
@@ -149,6 +191,17 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     fun setClickVolume(value: Float) {
         clickVolume.value = value
         engine.clickVolume = value
+    }
+
+    /**
+     * Loads [track] into the engine and updates BPM and beats per bar from the persisted values.
+     */
+    fun selectTrack(track: TrackEntity) {
+        bpm.value = track.bpm
+        beatsPerBar.value = track.beatsPerBar
+        engine.bpm = track.bpm
+        engine.beatsPerBar = track.beatsPerBar
+        selectFile(getApplication(), Uri.parse(track.uri))
     }
 
     override fun onCleared() {
