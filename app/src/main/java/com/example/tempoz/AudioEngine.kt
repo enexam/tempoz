@@ -45,6 +45,22 @@ class AudioEngine {
         nativeStop(handle)
     }
 
+    fun pause() {
+        nativePause(handle)
+    }
+
+    fun resume() {
+        nativeResume(handle)
+    }
+
+    fun seekToStart() {
+        nativeSeekToStart(handle)
+    }
+
+    fun isPlaying(): Boolean {
+        return nativeIsPlaying(handle)
+    }
+
     // ---- parameter setters ----
 
     var bpm: Int = 120
@@ -77,6 +93,10 @@ class AudioEngine {
     external fun nativeLoadFile(handle: Long, fd: Int, offset: Long, length: Long)
     external fun nativeStart(handle: Long)
     external fun nativeStop(handle: Long)
+    external fun nativePause(handle: Long)
+    external fun nativeResume(handle: Long)
+    external fun nativeSeekToStart(handle: Long)
+    external fun nativeIsPlaying(handle: Long): Boolean
     external fun nativeSetBpm(handle: Long, bpm: Int)
     external fun nativeSetBeatsPerBar(handle: Long, beatsPerBar: Int)
     external fun nativeSetTrackVolume(handle: Long, volume: Float)

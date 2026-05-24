@@ -93,6 +93,7 @@ bool FileDecoder::open(int fd, int64_t offset, int64_t length,
     mInputSampleRate = sampleRate;
     mInputChannels   = channels;
     mPcmEncoding     = pcmEncoding;
+    mFramesConsumed.store(0, std::memory_order_relaxed);
 
     LOGD("Audio track: sampleRate=%d channels=%d pcmEncoding=%d",
          sampleRate, channels, pcmEncoding);
@@ -153,6 +154,10 @@ void FileDecoder::start() {
         return;
     }
     mStarted = true;
+    launchDecodeThread();
+}
+
+void FileDecoder::launchDecodeThread() {
     mDecodeThread = std::thread(&FileDecoder::decodeLoop, this);
 }
 
@@ -165,6 +170,60 @@ void FileDecoder::stop() {
         AMediaCodec_stop(mCodec);
         mStarted = false;
     }
+}
+
+void FileDecoder::pause() {
+    // Signal and join the decode thread, then empty the FIFO.
+    mStopRequested.store(true, std::memory_order_relaxed);
+    if (mDecodeThread.joinable()) {
+        mDecodeThread.join();
+    }
+    // Flush FIFO by aligning read counter to write counter.
+    if (mFifo) {
+        mFifo->setReadCounter(mFifo->getWriteCounter());
+    }
+}
+
+void FileDecoder::resume(uint64_t frameOffset) {
+    // Convert frame offset to microseconds for the extractor seek.
+    int64_t seekUs = static_cast<int64_t>(
+            static_cast<double>(frameOffset) * 1e6 / static_cast<double>(mTargetSampleRate));
+    AMediaExtractor_seekTo(mExtractor, seekUs, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
+
+    // Flush/reset codec. If codec is not yet running (e.g. after stop()), start it first.
+    if (!mStarted) {
+        media_status_t status = AMediaCodec_start(mCodec);
+        if (status != AMEDIA_OK) {
+            LOGE("AMediaCodec_start in resume() failed: %d", status);
+            return;
+        }
+        mStarted = true;
+    } else {
+        AMediaCodec_flush(mCodec);
+    }
+
+    // Clear the FIFO.
+    if (mFifo) {
+        mFifo->setReadCounter(mFifo->getWriteCounter());
+    }
+
+    // Reset decode state.
+    mFramesConsumed.store(0, std::memory_order_relaxed);
+    mDecoderDone.store(false, std::memory_order_relaxed);
+    mResamplePhase = 0.0;
+    std::fill(mLastFrame.begin(), mLastFrame.end(), 0.0f);
+
+    // Restart the decode thread.
+    mStopRequested.store(false, std::memory_order_relaxed);
+    launchDecodeThread();
+}
+
+void FileDecoder::seekToStart() {
+    resume(0);
+}
+
+uint64_t FileDecoder::getFramesConsumed() {
+    return mFramesConsumed.load(std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +239,8 @@ void FileDecoder::read(float* out, int numFrames) {
                0,
                static_cast<size_t>(remaining * mTargetChannels) * sizeof(float));
     }
+    // Track real-time playback position (numFrames, not got, to include silence).
+    mFramesConsumed.fetch_add(static_cast<uint64_t>(numFrames), std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------

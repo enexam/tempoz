@@ -16,8 +16,9 @@
  * audio thread.
  *
  * Thread model:
- *   - open() / start() / stop() are called on the main thread.
- *   - read() / isEOF() are called on the audio callback thread (no allocs).
+ *   - open() / start() / stop() / pause() / resume() are called on the main thread.
+ *   - read() / isEOF() / getFramesConsumed() are called on the audio callback thread
+ *     (no allocs).
  *   - An internal decode thread writes to the FifoBuffer.
  *
  * Fd lifetime: AMediaExtractor dups the file descriptor internally, so the
@@ -49,9 +50,32 @@ public:
     void stop();
 
     /**
+     * Stop the decode thread and flush the FIFO to empty.
+     * The codec remains open (Executing state). Call resume() to restart.
+     */
+    void pause();
+
+    /**
+     * Seek to frameOffset in the audio file, flush the codec and FIFO, and
+     * restart the decode thread. If the codec is not currently running
+     * (e.g. after stop()), it is started first.
+     *
+     * Resets mFramesConsumed to zero.
+     *
+     * @param frameOffset target position in output frames (at mTargetSampleRate)
+     */
+    void resume(uint64_t frameOffset);
+
+    /** Seek back to the beginning of the file. Equivalent to resume(0). */
+    void seekToStart();
+
+    /**
      * Called from the audio thread. Drains up to numFrames frames from the
      * ring buffer into [out] (interleaved float32). Writes silence for any
      * frames that cannot be satisfied.
+     *
+     * Increments mFramesConsumed by numFrames (including any silence-filled
+     * frames), reflecting real-time playback position.
      *
      * @param out       destination buffer, numFrames * targetChannels floats
      * @param numFrames number of audio frames requested
@@ -64,9 +88,19 @@ public:
      */
     bool isEOF();
 
+    /**
+     * Returns the total number of frames consumed via read() since the last
+     * open() or resume(). Safe to call from any thread.
+     */
+    uint64_t getFramesConsumed();
+
 private:
     /** Decode loop executed by mDecodeThread. */
     void decodeLoop();
+
+    /** Launch the decode thread without the mStarted guard. Must only be called
+     *  when the codec is in Executing state and no thread is running. */
+    void launchDecodeThread();
 
     /**
      * Convert a raw MediaCodec output buffer to float32 interleaved samples
@@ -98,6 +132,10 @@ private:
     std::atomic<bool>     mStopRequested{false};
     std::atomic<bool>     mDecoderDone{false};  // codec EOS reached + flushed
     bool                  mStarted{false};       // true between start() and stop()
+
+    // ---- playback position ----
+    // Incremented by numFrames on every read() call. Reset on open()/resume().
+    std::atomic<uint64_t> mFramesConsumed{0};
 
     // ---- scratch buffers (decode thread only) ----
     // Float32 samples after format conversion, before resampling/upmix.

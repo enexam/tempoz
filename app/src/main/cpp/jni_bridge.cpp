@@ -54,6 +54,26 @@ Java_com_example_tempoz_AudioEngine_nativeSetClickVolume(
 }
 
 JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativePause(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    reinterpret_cast<AudioEngine*>(handle)->pause();
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeResume(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    reinterpret_cast<AudioEngine*>(handle)->resume();
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeSeekToStart(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    reinterpret_cast<AudioEngine*>(handle)->seekToStart();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_tempoz_AudioEngine_nativeIsPlaying(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    return reinterpret_cast<AudioEngine*>(handle)->isPlaying() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
 Java_com_example_tempoz_AudioEngine_nativeDestroy(
         JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
     delete reinterpret_cast<AudioEngine*>(handle);

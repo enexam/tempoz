@@ -82,6 +82,72 @@ void AudioEngine::stop() {
     }
 }
 
+void AudioEngine::pause() {
+    mIsPlaying.store(false, std::memory_order_relaxed);
+
+    // Close the stream first so the audio callback has exited before
+    // the FIFO read pointer is mutated inside mFileDecoder.pause().
+    if (mStream) {
+        mStream->requestStop();
+        mStream->close();
+        mStream.reset();
+    }
+
+    // Accumulate absolute position: offset from previous resumes plus
+    // frames played since the last resume.  FileDecoder::resume() resets
+    // mFramesConsumed to 0, so we must add rather than overwrite.
+    mPauseFrameOffset += mFileDecoder.getFramesConsumed();
+
+    // Pause the decoder (joins thread, flushes FIFO).
+    mFileDecoder.pause();
+}
+
+void AudioEngine::resume() {
+    // Rebuild the Oboe stream with the same parameters as start().
+    oboe::AudioStreamBuilder builder;
+    builder.setDataCallback(this)
+           ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+           ->setSharingMode(oboe::SharingMode::Exclusive)
+           ->setFormat(oboe::AudioFormat::Float)
+           ->setChannelCount(kDefaultChannelCount)
+           ->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium);
+
+    oboe::Result result = builder.openStream(mStream);
+    if (result != oboe::Result::OK) {
+        LOGE("resume: openStream failed: %s", oboe::convertToText(result));
+        return;
+    }
+
+    // Seek the decoder to the saved position and restart its thread.
+    if (mFileLoaded.load(std::memory_order_relaxed)) {
+        mFileDecoder.resume(mPauseFrameOffset);
+    }
+
+    // Reconfigure click generator for the stream's sample rate.
+    mClickGenerator.configure(mBpm.load(std::memory_order_relaxed),
+                               mBeatsPerBar.load(std::memory_order_relaxed),
+                               mStream->getSampleRate());
+
+    mIsPlaying.store(true, std::memory_order_relaxed);
+
+    result = mStream->start();
+    if (result != oboe::Result::OK) {
+        LOGE("resume: stream->start() failed: %s", oboe::convertToText(result));
+        mIsPlaying.store(false, std::memory_order_relaxed);
+    }
+}
+
+void AudioEngine::seekToStart() {
+    mPauseFrameOffset = 0;
+    stop();
+    mFileDecoder.seekToStart();
+    start();
+}
+
+bool AudioEngine::isPlaying() {
+    return mIsPlaying.load(std::memory_order_relaxed);
+}
+
 void AudioEngine::setBpm(int bpm) {
     mBpm.store(bpm, std::memory_order_relaxed);
 }

@@ -33,6 +33,26 @@ public:
     /** Stop the Oboe stream and the decode thread. */
     void stop();
 
+    /**
+     * Pause playback: saves the current file position, stops the Oboe stream,
+     * and stops the decode thread. Call resume() to continue.
+     */
+    void pause();
+
+    /**
+     * Resume playback from the position saved by pause(). Rebuilds the Oboe
+     * stream, seeks the decoder, and restarts the decode thread.
+     */
+    void resume();
+
+    /**
+     * Stop playback and seek back to the beginning of the file, then restart.
+     */
+    void seekToStart();
+
+    /** Returns true if the Oboe stream is currently playing. */
+    bool isPlaying();
+
     void setBpm(int bpm);
     void setBeatsPerBar(int beatsPerBar);
     void setTrackVolume(float volume);
@@ -55,6 +75,9 @@ private:
     std::atomic<float> mClickVolume{1.0f};
     std::atomic<bool>  mIsPlaying{false};
     std::atomic<bool>  mFileLoaded{false};
+
+    // File position (in output frames) saved by pause() for use by resume().
+    uint64_t mPauseFrameOffset{0};
 
     // Last values forwarded to mClickGenerator; 0 forces configure() on the
     // first onAudioReady call.
