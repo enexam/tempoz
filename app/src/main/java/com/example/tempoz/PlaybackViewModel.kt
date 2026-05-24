@@ -193,6 +193,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         engine.clickVolume = value
     }
 
+    /** Removes [track] from the persistent store. */
+    fun deleteTrack(track: TrackEntity) {
+        viewModelScope.launch { repository.deleteByUri(track.uri) }
+    }
+
     /**
      * Loads [track] into the engine and updates BPM and beats per bar from the persisted values.
      */

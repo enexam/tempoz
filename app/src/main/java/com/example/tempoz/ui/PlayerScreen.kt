@@ -10,14 +10,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -34,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.example.tempoz.PlaybackState
 import com.example.tempoz.PlaybackViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
     viewModel: PlaybackViewModel,
@@ -47,6 +51,9 @@ fun PlayerScreen(
     val trackVolume by viewModel.trackVolume.collectAsState()
     val clickVolume by viewModel.clickVolume.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
+    val tracks by viewModel.tracks.collectAsState()
+
+    var showTrackExplorer by remember { mutableStateOf(false) }
 
     // Local text state for BPM field to allow free typing before committing
     var bpmText by remember(bpm) { mutableStateOf(bpm.toString()) }
@@ -171,5 +178,28 @@ fun PlayerScreen(
                 )
             }
         }
+
+        // Tracks button
+        OutlinedButton(
+            onClick = { showTrackExplorer = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Filled.LibraryMusic,
+                contentDescription = null
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Tracks")
+        }
+    }
+
+    if (showTrackExplorer) {
+        TrackExplorerSheet(
+            tracks = tracks,
+            onSelectTrack = { viewModel.selectTrack(it) },
+            onDeleteTrack = { viewModel.deleteTrack(it) },
+            onImport = onPickFile,
+            onDismiss = { showTrackExplorer = false }
+        )
     }
 }
