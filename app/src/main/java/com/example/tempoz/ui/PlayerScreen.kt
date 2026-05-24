@@ -4,25 +4,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -33,9 +34,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.tempoz.PlaybackState
 import com.example.tempoz.PlaybackViewModel
+import androidx.compose.material3.MaterialTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,20 +57,24 @@ fun PlayerScreen(
     val tracks by viewModel.tracks.collectAsState()
 
     var showTrackExplorer by remember { mutableStateOf(false) }
+    var showMixer by remember { mutableStateOf(false) }
 
     // Local text state for BPM field to allow free typing before committing
     var bpmText by remember(bpm) { mutableStateOf(bpm.toString()) }
 
     Column(
         modifier = modifier
-            .fillMaxWidth()
+            .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // File pick button
-        Button(onClick = onPickFile, modifier = Modifier.fillMaxWidth()) {
-            Text(text = fileName)
-        }
+        // Track name
+        Text(
+            text = if (fileUri == null) "No track loaded" else fileName,
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center
+        )
 
         // BPM row
         Row(
@@ -122,43 +129,24 @@ fun PlayerScreen(
             }
         }
 
-        // Track volume slider
-        Text(text = "Track")
-        Slider(
-            value = trackVolume,
-            onValueChange = { viewModel.setTrackVolume(it) },
-            valueRange = 0f..1f,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Spacer(modifier = Modifier.weight(1f))
 
-        // Click volume slider
-        Text(text = "Click")
-        Slider(
-            value = clickVolume,
-            onValueChange = { viewModel.setClickVolume(it) },
-            valueRange = 0f..1f,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Restart + play/pause button row
+        // Play controls row
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             // Restart button
-            IconButton(
+            FilledTonalIconButton(
                 onClick = { viewModel.restart() },
-                enabled = fileUri != null
+                enabled = fileUri != null,
+                modifier = Modifier.size(56.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Replay,
-                    contentDescription = "Restart"
-                )
+                Icon(Icons.Filled.SkipPrevious, contentDescription = "Restart")
             }
-
-            // Play/pause toggle button
+            Spacer(Modifier.width(16.dp))
+            // Play/pause button
             FilledIconButton(
                 onClick = {
                     when (playbackState) {
@@ -167,29 +155,32 @@ fun PlayerScreen(
                         PlaybackState.PAUSED  -> viewModel.resume()
                     }
                 },
-                enabled = fileUri != null
+                enabled = fileUri != null,
+                modifier = Modifier.size(64.dp)
             ) {
                 Icon(
-                    imageVector = if (playbackState == PlaybackState.PLAYING)
-                        Icons.Filled.Pause
-                    else
-                        Icons.Filled.PlayArrow,
-                    contentDescription = if (playbackState == PlaybackState.PLAYING) "Pause" else "Play"
+                    imageVector = if (playbackState == PlaybackState.PLAYING) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (playbackState == PlaybackState.PLAYING) "Pause" else "Play",
+                    modifier = Modifier.size(32.dp)
                 )
             }
         }
 
-        // Tracks button
-        OutlinedButton(
-            onClick = { showTrackExplorer = true },
-            modifier = Modifier.fillMaxWidth()
+        // Bottom action row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
         ) {
-            Icon(
-                imageVector = Icons.Filled.LibraryMusic,
-                contentDescription = null
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Tracks")
+            OutlinedButton(onClick = { showTrackExplorer = true }) {
+                Icon(Icons.Filled.LibraryMusic, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Tracks")
+            }
+            OutlinedButton(onClick = { showMixer = true }) {
+                Icon(Icons.Filled.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Mixer")
+            }
         }
     }
 
@@ -200,6 +191,16 @@ fun PlayerScreen(
             onDeleteTrack = { viewModel.deleteTrack(it) },
             onImport = onPickFile,
             onDismiss = { showTrackExplorer = false }
+        )
+    }
+
+    if (showMixer) {
+        MixerSheet(
+            trackVolume = trackVolume,
+            clickVolume = clickVolume,
+            onTrackVolumeChange = { viewModel.setTrackVolume(it) },
+            onClickVolumeChange = { viewModel.setClickVolume(it) },
+            onDismiss = { showMixer = false }
         )
     }
 }
