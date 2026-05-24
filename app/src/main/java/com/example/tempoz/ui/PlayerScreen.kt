@@ -9,8 +9,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -24,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.tempoz.PlaybackState
 import com.example.tempoz.PlaybackViewModel
 
 @Composable
@@ -38,7 +46,7 @@ fun PlayerScreen(
     val beatsPerBar by viewModel.beatsPerBar.collectAsState()
     val trackVolume by viewModel.trackVolume.collectAsState()
     val clickVolume by viewModel.clickVolume.collectAsState()
-    val isPlaying by viewModel.isPlaying.collectAsState()
+    val playbackState by viewModel.playbackState.collectAsState()
 
     // Local text state for BPM field to allow free typing before committing
     var bpmText by remember(bpm) { mutableStateOf(bpm.toString()) }
@@ -127,13 +135,41 @@ fun PlayerScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Play/Stop button
-        Button(
-            onClick = { if (isPlaying) viewModel.stop() else viewModel.play() },
-            enabled = fileUri != null,
+        // Restart + play/pause button row
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (isPlaying) "Stop" else "Play")
+            // Restart button
+            IconButton(
+                onClick = { viewModel.restart() },
+                enabled = fileUri != null
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Replay,
+                    contentDescription = "Restart"
+                )
+            }
+
+            // Play/pause toggle button
+            FilledIconButton(
+                onClick = {
+                    when (playbackState) {
+                        PlaybackState.STOPPED -> viewModel.play()
+                        PlaybackState.PLAYING -> viewModel.pause()
+                        PlaybackState.PAUSED  -> viewModel.resume()
+                    }
+                },
+                enabled = fileUri != null
+            ) {
+                Icon(
+                    imageVector = if (playbackState == PlaybackState.PLAYING)
+                        Icons.Filled.Pause
+                    else
+                        Icons.Filled.PlayArrow,
+                    contentDescription = if (playbackState == PlaybackState.PLAYING) "Pause" else "Play"
+                )
+            }
         }
     }
 }

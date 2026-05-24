@@ -1,18 +1,29 @@
 package com.example.tempoz
 
+import android.app.Application
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
+/** Three-state playback machine exposed to the UI. */
+enum class PlaybackState { STOPPED, PLAYING, PAUSED }
 
 /**
- * ViewModel that owns the [AudioEngine] lifecycle and exposes playback state as [MutableStateFlow]s.
+ * ViewModel that owns the [AudioEngine] lifecycle and exposes playback state as [StateFlow]s.
  *
- * Call order for playback: pick a file via [selectFile], then call [play] / [stop] as needed.
- * Volume and BPM changes propagate to the engine immediately regardless of playback state.
+ * Call order for playback: pick a file via [selectFile], then call [play] / [pause] / [resume] /
+ * [restart] / [stop] as needed. Volume and BPM changes propagate to the engine immediately
+ * regardless of playback state.
  */
-class PlaybackViewModel : ViewModel() {
+class PlaybackViewModel(application: Application) : AndroidViewModel(application) {
 
     private val engine = AudioEngine()
 
@@ -26,7 +37,12 @@ class PlaybackViewModel : ViewModel() {
     val beatsPerBar = MutableStateFlow(4)
     val trackVolume = MutableStateFlow(1.0f)
     val clickVolume = MutableStateFlow(0.8f)
-    val isPlaying = MutableStateFlow(false)
+
+    private val _playbackState = MutableStateFlow(PlaybackState.STOPPED)
+    val playbackState: StateFlow<PlaybackState> = _playbackState
+
+    /** Nullable job for the 250 ms EOF-detection polling loop. Active only when PLAYING. */
+    private var pollJob: Job? = null
 
     /**
      * Opens [uri] via the content resolver, loads the file into the audio engine, and updates
@@ -62,22 +78,53 @@ class PlaybackViewModel : ViewModel() {
     }
 
     /**
-     * Starts playback. No-op if no file has been loaded (i.e. [fileUri] is null).
-     *
-     * Applies the current [bpm] and [beatsPerBar] values before starting.
+     * Starts playback from the current position. No-op if no file has been loaded or if the
+     * engine is not STOPPED. Applies the current [bpm] and [beatsPerBar] before starting.
      */
     fun play() {
         if (fileUri.value == null) return
+        if (_playbackState.value != PlaybackState.STOPPED) return
         engine.bpm = bpm.value
         engine.beatsPerBar = beatsPerBar.value
         engine.start()
-        isPlaying.value = true
+        _playbackState.value = PlaybackState.PLAYING
+        launchPollJob()
     }
 
-    /** Stops playback. */
+    /** Pauses playback. No-op unless currently PLAYING. */
+    fun pause() {
+        if (_playbackState.value != PlaybackState.PLAYING) return
+        engine.pause()
+        cancelPollJob()
+        _playbackState.value = PlaybackState.PAUSED
+    }
+
+    /** Resumes from a paused position. No-op unless currently PAUSED. */
+    fun resume() {
+        if (_playbackState.value != PlaybackState.PAUSED) return
+        engine.resume()
+        _playbackState.value = PlaybackState.PLAYING
+        launchPollJob()
+    }
+
+    /**
+     * Stops the engine, seeks to the beginning, then starts playback from the top. Works from
+     * any state as long as a file is loaded.
+     */
+    fun restart() {
+        if (fileUri.value == null) return
+        cancelPollJob()
+        engine.stop()
+        engine.seekToStart()
+        _playbackState.value = PlaybackState.STOPPED
+        play()
+    }
+
+    /** Stops playback and resets state to STOPPED. */
     fun stop() {
         engine.stop()
-        isPlaying.value = false
+        cancelPollJob()
+        _playbackState.value = PlaybackState.STOPPED
     }
 
     /** Updates [bpm] and propagates the new value to the engine immediately. */
@@ -107,5 +154,24 @@ class PlaybackViewModel : ViewModel() {
     override fun onCleared() {
         stop()
         engine.destroy()
+    }
+
+    // ---- internals ----
+
+    private fun launchPollJob() {
+        pollJob = viewModelScope.launch {
+            while (isActive) {
+                delay(250)
+                if (!engine.isPlaying()) {
+                    _playbackState.value = PlaybackState.STOPPED
+                    break
+                }
+            }
+        }
+    }
+
+    private fun cancelPollJob() {
+        pollJob?.cancel()
+        pollJob = null
     }
 }
