@@ -11,14 +11,11 @@ import androidx.activity.result.contract.ActivityResultContracts.GetContent
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.tempoz.ui.PlayerScreen
 import com.example.tempoz.ui.theme.TempozTheme
 
 class MainActivity : ComponentActivity() {
@@ -48,35 +45,13 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    TempozApp(
+                    PlayerScreen(
+                        viewModel = viewModel,
                         onPickFile = { permissionLauncher.launch(permission) },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
             }
         }
-    }
-}
-
-
-@Composable
-fun TempozApp(
-    onPickFile: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // TODO: replace with PlayerScreen in task 5
-    Button(
-        onClick = onPickFile,
-        modifier = modifier
-    ) {
-        Text(text = "Pick audio file")
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun TempozAppPreview() {
-    TempozTheme {
-        TempozApp(onPickFile = {})
     }
 }
