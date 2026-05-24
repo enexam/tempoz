@@ -67,26 +67,38 @@ Versions: AGP 9.2.1 · Kotlin 2.2.10 · Compose BOM 2026.02.01 · Gradle 9.4.1.
 
 ## Development
 
-### Phase 1 — 1p × 2–3 weeks
+### Phase 1
 
 - Android app ready for distribution on Android 16
 - Read an audio file and a metronome at the same time to audio output (no sync, user-provided bpm and signature)
 - Volume mixing of click and audio file
 
-### Phase 2 — 1p × 4–6 weeks
+### Phase 1b
+
+Based on user review after Phase 1:
+- Add expected features from a Media player:
+  - Track timeline
+  - Track file explorer
+  - Next/Previous track buttons
+- Fill .gitignore
+- Make a github pipelines
+  - Release on tags v*.*.*: build, test, deploy an apk
+  - Build and test on push / PR
+
+### Phase 2
 
 - Add support for Android 12..16, or even 10..16
 - Import an audio file, user-provided signature, analyze and store BPM + timing offset of the recording (when to start click), store metadata
 - Read an audio file with a synced click based on saved metadata (automatic offset + BPM)
 
-### Phase 3 — 1p × 3–5 weeks
+### Phase 3
 
 - Add count-in of specified number of bars
 - Configurable click sound, multiple options (kick, click, ping...)
 - Configurable accents/ghost notes (playing round notes to 16th)
 - Change BPM of a track (no pitch change)
 
-### Phase 4 — 1p × 2–4 weeks
+### Phase 4
 
 - Auto-detect signature
 - Battery optimization
