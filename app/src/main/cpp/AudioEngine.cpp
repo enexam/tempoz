@@ -121,6 +121,16 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
         memset(fileBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
     }
 
+    // Reconfigure the click generator if BPM or beatsPerBar changed.
+    const int curBpm = mBpm.load(std::memory_order_relaxed);
+    const int curBeatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
+    if (curBpm != mLastBpm || curBeatsPerBar != mLastBeatsPerBar) {
+        mClickGenerator.configure(curBpm, curBeatsPerBar,
+                                  mStream->getSampleRate());
+        mLastBpm = curBpm;
+        mLastBeatsPerBar = curBeatsPerBar;
+    }
+
     // ClickGenerator::render sums into existing content — zero first.
     memset(clickBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
     mClickGenerator.render(clickBuf, numFrames, channels, 1.0f);

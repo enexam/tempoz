@@ -20,8 +20,8 @@
  *   - read() / isEOF() are called on the audio callback thread (no allocs).
  *   - An internal decode thread writes to the FifoBuffer.
  *
- * Fd lifetime: the file descriptor passed to open() must remain valid until
- * stop() returns.
+ * Fd lifetime: AMediaExtractor dups the file descriptor internally, so the
+ * caller may close the fd immediately after open() returns.
  */
 class FileDecoder {
 public:
@@ -33,7 +33,7 @@ public:
      * Sets up AMediaExtractor + AMediaCodec for the first audio track.
      * Returns true on success.
      *
-     * @param fd               file descriptor (must outlive stop())
+     * @param fd               file descriptor (may be closed after open() returns)
      * @param offset           byte offset of the data source within fd
      * @param length           byte length of the data source
      * @param targetSampleRate desired output sample rate in Hz

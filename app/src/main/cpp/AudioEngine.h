@@ -55,4 +55,9 @@ private:
     std::atomic<float> mClickVolume{1.0f};
     std::atomic<bool>  mIsPlaying{false};
     std::atomic<bool>  mFileLoaded{false};
+
+    // Last values forwarded to mClickGenerator; 0 forces configure() on the
+    // first onAudioReady call.
+    int mLastBpm{0};
+    int mLastBeatsPerBar{0};
 };
