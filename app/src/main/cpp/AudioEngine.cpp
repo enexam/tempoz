@@ -19,6 +19,7 @@ AudioEngine::~AudioEngine() {
 }
 
 void AudioEngine::loadFile(int fd, int64_t offset, int64_t length) {
+    mPauseFrameOffset = 0;
     int sampleRate   = kDefaultSampleRate;
     int channelCount = kDefaultChannelCount;
 
@@ -141,7 +142,6 @@ void AudioEngine::seekToStart() {
     mPauseFrameOffset = 0;
     stop();
     mFileDecoder.seekToStart();
-    start();
 }
 
 bool AudioEngine::isPlaying() {

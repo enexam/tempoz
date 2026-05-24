@@ -100,6 +100,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             pfd.close()
             return
         }
+        if (_playbackState.value != PlaybackState.STOPPED) {
+            stop()
+        }
         engine.loadFile(pfd.fd, 0L, length)
         pfd.close()
         fileUri.value = uri
