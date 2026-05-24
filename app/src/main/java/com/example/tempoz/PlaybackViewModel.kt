@@ -253,12 +253,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             while (isActive) {
                 delay(250)
                 if (!engine.isPlaying()) {
-                    _playbackState.value = PlaybackState.STOPPED
-                    getApplication<Application>().startService(
-                        Intent(getApplication(), PlaybackService::class.java).apply {
-                            action = PlaybackService.ACTION_STOP
-                        }
-                    )
+                    stop()
                     break
                 }
             }
