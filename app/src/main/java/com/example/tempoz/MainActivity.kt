@@ -19,8 +19,15 @@ import com.example.tempoz.ui.PlayerScreen
 import com.example.tempoz.ui.theme.TempozTheme
 
 class MainActivity : ComponentActivity() {
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(RequestPermission()) { /* no-op: best-effort */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 33) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         enableEdgeToEdge()
         setContent {
             TempozTheme {

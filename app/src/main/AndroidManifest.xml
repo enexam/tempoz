@@ -6,6 +6,9 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -27,6 +30,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".PlaybackService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />
+        <receiver
+            android:name=".MediaControlReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.tempoz.ACTION_PLAY_PAUSE" />
+                <action android:name="com.example.tempoz.ACTION_RESTART" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

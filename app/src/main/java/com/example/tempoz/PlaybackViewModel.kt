@@ -2,6 +2,7 @@ package com.example.tempoz
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
@@ -35,6 +36,20 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     init {
         engine.create()
+        viewModelScope.launch {
+            PlaybackController.actions.collect { action ->
+                when (action) {
+                    PlaybackController.ACTION_PLAY_PAUSE -> {
+                        when (_playbackState.value) {
+                            PlaybackState.PLAYING -> pause()
+                            PlaybackState.PAUSED -> resume()
+                            PlaybackState.STOPPED -> if (fileUri.value != null) play()
+                        }
+                    }
+                    PlaybackController.ACTION_RESTART -> restart()
+                }
+            }
+        }
     }
 
     val fileUri = MutableStateFlow<Uri?>(null)
@@ -130,6 +145,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         engine.beatsPerBar = beatsPerBar.value
         engine.start()
         _playbackState.value = PlaybackState.PLAYING
+        updateNotification()
         launchPollJob()
     }
 
@@ -139,6 +155,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         engine.pause()
         cancelPollJob()
         _playbackState.value = PlaybackState.PAUSED
+        updateNotification()
     }
 
     /** Resumes from a paused position. No-op unless currently PAUSED. */
@@ -146,6 +163,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         if (_playbackState.value != PlaybackState.PAUSED) return
         engine.resume()
         _playbackState.value = PlaybackState.PLAYING
+        updateNotification()
         launchPollJob()
     }
 
@@ -167,6 +185,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         engine.stop()
         cancelPollJob()
         _playbackState.value = PlaybackState.STOPPED
+        getApplication<Application>().startService(
+            Intent(getApplication(), PlaybackService::class.java).apply {
+                action = PlaybackService.ACTION_STOP
+            }
+        )
     }
 
     /** Updates [bpm] and propagates the new value to the engine immediately. */
@@ -216,12 +239,26 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     // ---- internals ----
 
+    private fun updateNotification() {
+        val intent = Intent(getApplication(), PlaybackService::class.java).apply {
+            action = PlaybackService.ACTION_START
+            putExtra("trackName", fileName.value)
+            putExtra("isPlaying", _playbackState.value == PlaybackState.PLAYING)
+        }
+        getApplication<Application>().startForegroundService(intent)
+    }
+
     private fun launchPollJob() {
         pollJob = viewModelScope.launch {
             while (isActive) {
                 delay(250)
                 if (!engine.isPlaying()) {
                     _playbackState.value = PlaybackState.STOPPED
+                    getApplication<Application>().startService(
+                        Intent(getApplication(), PlaybackService::class.java).apply {
+                            action = PlaybackService.ACTION_STOP
+                        }
+                    )
                     break
                 }
             }
