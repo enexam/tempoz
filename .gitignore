@@ -7,3 +7,5 @@ local.properties
 /captures
 .externalNativeBuild
 .cxx
+/test_stdout*.txt
+/test_stderr*.txt
