@@ -1,6 +1,7 @@
 #include <jni.h>
 
 #include "AudioEngine.h"
+#include "BpmAnalyzer.h"
 
 extern "C" {
 
@@ -95,6 +96,23 @@ JNIEXPORT void JNICALL
 Java_com_example_tempoz_AudioEngine_nativeSeekTo(
         JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jlong positionMs) {
     reinterpret_cast<AudioEngine*>(handle)->seekTo(static_cast<int64_t>(positionMs));
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_com_example_tempoz_AudioEngine_nativeAnalyzeBpm(
+        JNIEnv* env, jobject /*thiz*/,
+        jlong /*handle*/, jint fd, jlong offset, jlong length) {
+    BpmResult result = BpmAnalyzer{}.analyze(
+            static_cast<int>(fd),
+            static_cast<int64_t>(offset),
+            static_cast<int64_t>(length));
+    jlongArray arr = env->NewLongArray(2);
+    if (arr) {
+        jlong values[2] = {static_cast<jlong>(result.bpm),
+                           static_cast<jlong>(result.firstBeatFrames)};
+        env->SetLongArrayRegion(arr, 0, 2, values);
+    }
+    return arr;
 }
 
 } // extern "C"

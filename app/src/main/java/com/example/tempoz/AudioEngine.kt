@@ -73,6 +73,16 @@ class AudioEngine {
         nativeSeekTo(handle, positionMs)
     }
 
+    /**
+     * Analyze the audio file identified by [fd, offset, length] and return
+     * a two-element array [detectedBpm, firstBeatFrames].
+     * Returns [0, 0] if the engine has not been created or analysis fails.
+     */
+    fun analyzeBpm(fd: Int, offset: Long, length: Long): LongArray {
+        if (handle == 0L) return LongArray(2)
+        return nativeAnalyzeBpm(handle, fd, offset, length)
+    }
+
     // ---- parameter setters ----
 
     var bpm: Int = 120
@@ -112,6 +122,7 @@ class AudioEngine {
     external fun nativeGetDurationMs(handle: Long): Long
     external fun nativeGetPositionMs(handle: Long): Long
     external fun nativeSeekTo(handle: Long, positionMs: Long)
+    external fun nativeAnalyzeBpm(handle: Long, fd: Int, offset: Long, length: Long): LongArray
     external fun nativeSetBpm(handle: Long, bpm: Int)
     external fun nativeSetBeatsPerBar(handle: Long, beatsPerBar: Int)
     external fun nativeSetTrackVolume(handle: Long, volume: Float)
