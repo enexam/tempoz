@@ -6,9 +6,14 @@ Tempoz is an Android app that adds a metronome to music tracks. Load any audio f
 
 - Play an audio file and a metronome click track simultaneously
 - BPM and time signature (beats per bar) control
+- Automatic BPM detection and beat offset analysis when importing tracks
+- Synchronized metronome playback aligned to the detected beat offset
+- Seek timeline with elapsed and remaining time display
+- Next/previous track navigation with circular looping through imported tracks
+- Loop mode toggle to repeat a track indefinitely
 - Independent volume mixing for the audio track and the click
 - Play / pause / restart controls
-- Track explorer: import and persist multiple tracks; tap to reload saved BPM and signature
+- Track explorer: import and persist multiple tracks; tap to reload saved BPM, signature, and auto-detected settings
 - Media notification and lock-screen controls (play/pause, restart)
 
 ## Requirements
@@ -40,6 +45,6 @@ See [`.claude/CLAUDE.md`](.claude/CLAUDE.md) for a detailed architecture referen
 
 ## Roadmap
 
-- **Phase 2** — seek timeline, next/previous track, BPM analysis and auto-sync
+- **Phase 2** ✓ — seek timeline, next/previous track, BPM analysis and auto-sync
 - **Phase 3** — count-in, configurable click sounds, accent patterns, tempo change
 - **Phase 4** — auto-detect time signature, Google Play deployment
