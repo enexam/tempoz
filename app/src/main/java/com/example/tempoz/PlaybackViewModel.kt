@@ -121,6 +121,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         val name = displayName ?: uri.lastPathSegment ?: "Unknown"
         fileName.value = name
         currentTrackUri = uri
+        val existingTrack = tracks.value.find { it.uri == uri.toString() }
         viewModelScope.launch {
             repository.upsert(
                 TrackEntity(
@@ -128,7 +129,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     displayName = name,
                     bpm = bpm.value,
                     beatsPerBar = beatsPerBar.value,
-                    lastUsedMs = System.currentTimeMillis()
+                    lastUsedMs = System.currentTimeMillis(),
+                    detectedBpm = existingTrack?.detectedBpm,
+                    beatOffsetFrames = existingTrack?.beatOffsetFrames
                 )
             )
         }
@@ -173,6 +176,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         if (_playbackState.value != PlaybackState.STOPPED) return
         val uri = currentTrackUri
         if (uri != null) {
+            val existing = tracks.value.find { it.uri == uri.toString() }
             viewModelScope.launch {
                 repository.upsert(
                     TrackEntity(
@@ -180,7 +184,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                         displayName = fileName.value,
                         bpm = bpm.value,
                         beatsPerBar = beatsPerBar.value,
-                        lastUsedMs = System.currentTimeMillis()
+                        lastUsedMs = System.currentTimeMillis(),
+                        detectedBpm = existing?.detectedBpm,
+                        beatOffsetFrames = existing?.beatOffsetFrames
                     )
                 )
             }
