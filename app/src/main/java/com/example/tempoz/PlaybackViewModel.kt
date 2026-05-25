@@ -62,6 +62,12 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private val _playbackState = MutableStateFlow(PlaybackState.STOPPED)
     val playbackState: StateFlow<PlaybackState> = _playbackState
 
+    private val _durationMs = MutableStateFlow(0L)
+    val durationMs: StateFlow<Long> = _durationMs
+
+    private val _currentPositionMs = MutableStateFlow(0L)
+    val currentPositionMs: StateFlow<Long> = _currentPositionMs
+
     /** Reactive list of all persisted tracks ordered by last used time. */
     val tracks: StateFlow<List<TrackEntity>> = repository.tracks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -105,6 +111,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         }
         engine.loadFile(pfd.fd, 0L, length)
         pfd.close()
+        _durationMs.value = engine.getDurationMs()
+        _currentPositionMs.value = 0L
         fileUri.value = uri
         val name = displayName ?: uri.lastPathSegment ?: "Unknown"
         fileName.value = name
@@ -219,6 +227,12 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         engine.clickVolume = value
     }
 
+    /** Seeks to [positionMs] and updates [currentPositionMs] immediately. */
+    fun seekTo(positionMs: Long) {
+        _currentPositionMs.value = positionMs
+        engine.seekTo(positionMs)
+    }
+
     /** Removes [track] from the persistent store. */
     fun deleteTrack(track: TrackEntity) {
         viewModelScope.launch { repository.deleteByUri(track.uri) }
@@ -255,6 +269,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         pollJob = viewModelScope.launch {
             while (isActive) {
                 delay(250)
+                _currentPositionMs.value = engine.getPositionMs()
                 if (!engine.isPlaying()) {
                     stop()
                     break

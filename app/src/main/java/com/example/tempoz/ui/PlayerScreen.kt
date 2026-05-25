@@ -24,10 +24,12 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,9 +57,14 @@ fun PlayerScreen(
     val clickVolume by viewModel.clickVolume.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     val tracks by viewModel.tracks.collectAsState()
+    val durationMs by viewModel.durationMs.collectAsState()
+    val currentPositionMs by viewModel.currentPositionMs.collectAsState()
 
     var showTrackExplorer by remember { mutableStateOf(false) }
     var showMixer by remember { mutableStateOf(false) }
+
+    var isDragging by remember { mutableStateOf(false) }
+    var dragValue by remember { mutableFloatStateOf(0f) }
 
     // Local text state for BPM field to allow free typing before committing
     var bpmText by remember(bpm) { mutableStateOf(bpm.toString()) }
@@ -75,6 +82,41 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center
         )
+
+        // Seek section
+        Column(modifier = Modifier.fillMaxWidth()) {
+            val sliderValue = if (isDragging) dragValue
+                else (currentPositionMs.toFloat() / durationMs.coerceAtLeast(1L).toFloat())
+            Slider(
+                value = sliderValue,
+                onValueChange = { newValue ->
+                    isDragging = true
+                    dragValue = newValue
+                },
+                onValueChangeFinished = {
+                    viewModel.seekTo((dragValue * durationMs).toLong())
+                    isDragging = false
+                },
+                valueRange = 0f..1f,
+                enabled = durationMs > 0L,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                val elapsedSec = (currentPositionMs / 1000L).toInt()
+                val remainingSec = ((durationMs - currentPositionMs).coerceAtLeast(0L) / 1000L).toInt()
+                Text(
+                    text = "${elapsedSec / 60}:${(elapsedSec % 60).toString().padStart(2, '0')}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    text = "-${remainingSec / 60}:${(remainingSec % 60).toString().padStart(2, '0')}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
 
         // BPM row
         Row(
