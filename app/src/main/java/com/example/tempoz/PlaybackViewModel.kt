@@ -133,29 +133,33 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             )
         }
         val capturedLength = length
-        viewModelScope.launch(Dispatchers.IO) {
-            isAnalyzing.value = true
-            val analysisPfd = context.contentResolver.openFileDescriptor(uri, "r")
-            if (analysisPfd != null) {
-                val result = engine.analyzeBpm(analysisPfd.fd, 0L, capturedLength)
-                analysisPfd.close()
-                if (result[0] > 0) {
-                    engine.setFirstBeatOffset(result[1])
-                    setBpm(result[0].toInt())
-                    repository.upsert(
-                        TrackEntity(
-                            uri = uri.toString(),
-                            displayName = name,
-                            bpm = result[0].toInt(),
-                            beatsPerBar = beatsPerBar.value,
-                            lastUsedMs = System.currentTimeMillis(),
-                            detectedBpm = result[0].toInt(),
-                            beatOffsetFrames = result[1]
+        val capturedUri = uri
+        val alreadyAnalyzed = tracks.value.find { it.uri == uri.toString() }?.detectedBpm != null
+        if (!alreadyAnalyzed) {
+            viewModelScope.launch(Dispatchers.IO) {
+                isAnalyzing.value = true
+                val analysisPfd = context.contentResolver.openFileDescriptor(capturedUri, "r")
+                if (analysisPfd != null) {
+                    val result = engine.analyzeBpm(analysisPfd.fd, 0L, capturedLength)
+                    analysisPfd.close()
+                    if (result[0] > 0 && currentTrackUri == capturedUri) {
+                        engine.setFirstBeatOffset(result[1])
+                        setBpm(result[0].toInt())
+                        repository.upsert(
+                            TrackEntity(
+                                uri = capturedUri.toString(),
+                                displayName = name,
+                                bpm = result[0].toInt(),
+                                beatsPerBar = beatsPerBar.value,
+                                lastUsedMs = System.currentTimeMillis(),
+                                detectedBpm = result[0].toInt(),
+                                beatOffsetFrames = result[1]
+                            )
                         )
-                    )
+                    }
                 }
+                isAnalyzing.value = false
             }
-            isAnalyzing.value = false
         }
     }
 
