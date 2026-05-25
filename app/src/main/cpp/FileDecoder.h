@@ -94,6 +94,13 @@ public:
      */
     uint64_t getFramesConsumed();
 
+    /**
+     * Returns the total duration of the opened audio file in frames at
+     * mTargetSampleRate. Returns 0 if open() has not been called or the
+     * format did not contain a duration.
+     */
+    int64_t getDurationFrames();
+
 private:
     /** Decode loop executed by mDecodeThread. */
     void decodeLoop();
@@ -136,6 +143,9 @@ private:
     // ---- playback position ----
     // Incremented by numFrames on every read() call. Reset on open()/resume().
     std::atomic<uint64_t> mFramesConsumed{0};
+
+    // Total duration in output frames; set in open() from AMEDIAFORMAT_KEY_DURATION.
+    int64_t mDurationFrames{0};
 
     // ---- scratch buffers (decode thread only) ----
     // Float32 samples after format conversion, before resampling/upmix.

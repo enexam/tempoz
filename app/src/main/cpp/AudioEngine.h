@@ -53,6 +53,24 @@ public:
     /** Returns true if the Oboe stream is currently playing. */
     bool isPlaying();
 
+    /**
+     * Returns the total duration of the loaded audio file in milliseconds.
+     * Returns 0 if no file has been loaded or the format has no duration.
+     */
+    int64_t getDurationMs();
+
+    /**
+     * Returns the current playback position in milliseconds, accounting for
+     * the accumulated pause offset and frames consumed since the last resume.
+     */
+    int64_t getPositionMs();
+
+    /**
+     * Seek to positionMs milliseconds from the start of the file. If playing,
+     * stops the engine, seeks, and restarts. If paused/stopped, only seeks.
+     */
+    void seekTo(int64_t positionMs);
+
     void setBpm(int bpm);
     void setBeatsPerBar(int beatsPerBar);
     void setTrackVolume(float volume);

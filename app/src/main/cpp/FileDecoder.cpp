@@ -95,6 +95,11 @@ bool FileDecoder::open(int fd, int64_t offset, int64_t length,
     mPcmEncoding     = pcmEncoding;
     mFramesConsumed.store(0, std::memory_order_relaxed);
 
+    // Read duration from the track format (microseconds → output frames).
+    int64_t durationUs = 0;
+    AMediaFormat_getInt64(trackFormat, AMEDIAFORMAT_KEY_DURATION, &durationUs);
+    mDurationFrames = durationUs * targetSampleRate / 1000000;
+
     LOGD("Audio track: sampleRate=%d channels=%d pcmEncoding=%d",
          sampleRate, channels, pcmEncoding);
 
@@ -224,6 +229,10 @@ void FileDecoder::seekToStart() {
 
 uint64_t FileDecoder::getFramesConsumed() {
     return mFramesConsumed.load(std::memory_order_relaxed);
+}
+
+int64_t FileDecoder::getDurationFrames() {
+    return mDurationFrames;
 }
 
 // ---------------------------------------------------------------------------

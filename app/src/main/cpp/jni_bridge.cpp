@@ -79,4 +79,22 @@ Java_com_example_tempoz_AudioEngine_nativeDestroy(
     delete reinterpret_cast<AudioEngine*>(handle);
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_example_tempoz_AudioEngine_nativeGetDurationMs(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    return static_cast<jlong>(reinterpret_cast<AudioEngine*>(handle)->getDurationMs());
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_tempoz_AudioEngine_nativeGetPositionMs(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    return static_cast<jlong>(reinterpret_cast<AudioEngine*>(handle)->getPositionMs());
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeSeekTo(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jlong positionMs) {
+    reinterpret_cast<AudioEngine*>(handle)->seekTo(static_cast<int64_t>(positionMs));
+}
+
 } // extern "C"

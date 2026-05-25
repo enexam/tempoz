@@ -61,6 +61,18 @@ class AudioEngine {
         return nativeIsPlaying(handle)
     }
 
+    fun getDurationMs(): Long {
+        return nativeGetDurationMs(handle)
+    }
+
+    fun getPositionMs(): Long {
+        return nativeGetPositionMs(handle)
+    }
+
+    fun seekTo(positionMs: Long) {
+        nativeSeekTo(handle, positionMs)
+    }
+
     // ---- parameter setters ----
 
     var bpm: Int = 120
@@ -97,6 +109,9 @@ class AudioEngine {
     external fun nativeResume(handle: Long)
     external fun nativeSeekToStart(handle: Long)
     external fun nativeIsPlaying(handle: Long): Boolean
+    external fun nativeGetDurationMs(handle: Long): Long
+    external fun nativeGetPositionMs(handle: Long): Long
+    external fun nativeSeekTo(handle: Long, positionMs: Long)
     external fun nativeSetBpm(handle: Long, bpm: Int)
     external fun nativeSetBeatsPerBar(handle: Long, beatsPerBar: Int)
     external fun nativeSetTrackVolume(handle: Long, volume: Float)

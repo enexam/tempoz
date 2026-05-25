@@ -148,6 +148,27 @@ bool AudioEngine::isPlaying() {
     return mIsPlaying.load(std::memory_order_relaxed);
 }
 
+int64_t AudioEngine::getDurationMs() {
+    return mFileDecoder.getDurationFrames() * 1000LL / kDefaultSampleRate;
+}
+
+int64_t AudioEngine::getPositionMs() {
+    return static_cast<int64_t>(
+            (mPauseFrameOffset + mFileDecoder.getFramesConsumed()) * 1000LL / kDefaultSampleRate);
+}
+
+void AudioEngine::seekTo(int64_t positionMs) {
+    bool wasPlaying = mIsPlaying.load(std::memory_order_relaxed);
+    if (wasPlaying) {
+        stop();
+    }
+    mPauseFrameOffset = static_cast<uint64_t>(positionMs * kDefaultSampleRate / 1000);
+    mFileDecoder.resume(mPauseFrameOffset);
+    if (wasPlaying) {
+        start();
+    }
+}
+
 void AudioEngine::setBpm(int bpm) {
     mBpm.store(bpm, std::memory_order_relaxed);
 }
