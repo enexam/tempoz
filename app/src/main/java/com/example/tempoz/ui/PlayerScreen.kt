@@ -14,6 +14,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -23,6 +26,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -59,6 +63,7 @@ fun PlayerScreen(
     val tracks by viewModel.tracks.collectAsState()
     val durationMs by viewModel.durationMs.collectAsState()
     val currentPositionMs by viewModel.currentPositionMs.collectAsState()
+    val loopMode by viewModel.loopMode.collectAsState()
 
     var showTrackExplorer by remember { mutableStateOf(false) }
     var showMixer by remember { mutableStateOf(false) }
@@ -173,21 +178,30 @@ fun PlayerScreen(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Play controls row
+        // Play controls row: [prev] [restart] [play/pause] [next]
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Prev track button
+            FilledTonalIconButton(
+                onClick = { viewModel.prevTrack() },
+                enabled = tracks.size > 1,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous track")
+            }
+            Spacer(Modifier.width(8.dp))
             // Restart button
             FilledTonalIconButton(
                 onClick = { viewModel.restart() },
                 enabled = fileUri != null,
-                modifier = Modifier.size(56.dp)
+                modifier = Modifier.size(48.dp)
             ) {
-                Icon(Icons.Filled.SkipPrevious, contentDescription = "Restart")
+                Icon(Icons.Filled.Replay, contentDescription = "Restart")
             }
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(8.dp))
             // Play/pause button
             FilledIconButton(
                 onClick = {
@@ -205,6 +219,38 @@ fun PlayerScreen(
                     contentDescription = if (playbackState == PlaybackState.PLAYING) "Pause" else "Play",
                     modifier = Modifier.size(32.dp)
                 )
+            }
+            Spacer(Modifier.width(8.dp))
+            // Next track button
+            FilledTonalIconButton(
+                onClick = { viewModel.nextTrack() },
+                enabled = tracks.size > 1,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.Filled.SkipNext, contentDescription = "Next track")
+            }
+        }
+
+        // Loop toggle row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (loopMode) {
+                FilledTonalIconButton(
+                    onClick = { viewModel.toggleLoop() },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(Icons.Filled.Repeat, contentDescription = "Loop on")
+                }
+            } else {
+                OutlinedIconButton(
+                    onClick = { viewModel.toggleLoop() },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(Icons.Filled.Repeat, contentDescription = "Loop off")
+                }
             }
         }
 

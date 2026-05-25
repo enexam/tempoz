@@ -75,6 +75,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     /** Tracks the URI of the most recently loaded file for upsert in [play]. */
     private var currentTrackUri: Uri? = null
 
+    val loopMode = MutableStateFlow(false)
+
     /** Nullable job for the 250 ms EOF-detection polling loop. Active only when PLAYING. */
     private var pollJob: Job? = null
 
@@ -233,6 +235,39 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         engine.seekTo(positionMs)
     }
 
+    /** Toggles loop mode on/off. */
+    fun toggleLoop() {
+        loopMode.value = !loopMode.value
+    }
+
+    /**
+     * Loads the track after the current one in [tracks] (circular). No-op if fewer than 2 tracks
+     * or if [currentTrackUri] is not found in the list. Resumes playback if the engine was playing.
+     */
+    fun nextTrack() {
+        val list = tracks.value
+        if (list.size <= 1) return
+        val idx = list.indexOfFirst { it.uri == currentTrackUri?.toString() }
+        if (idx == -1) return
+        val wasPlaying = _playbackState.value == PlaybackState.PLAYING
+        selectTrack(list[(idx + 1) % list.size])
+        if (wasPlaying) play()
+    }
+
+    /**
+     * Loads the track before the current one in [tracks] (circular). No-op if fewer than 2 tracks
+     * or if [currentTrackUri] is not found in the list. Resumes playback if the engine was playing.
+     */
+    fun prevTrack() {
+        val list = tracks.value
+        if (list.size <= 1) return
+        val idx = list.indexOfFirst { it.uri == currentTrackUri?.toString() }
+        if (idx == -1) return
+        val wasPlaying = _playbackState.value == PlaybackState.PLAYING
+        selectTrack(list[(idx - 1 + list.size) % list.size])
+        if (wasPlaying) play()
+    }
+
     /** Removes [track] from the persistent store. */
     fun deleteTrack(track: TrackEntity) {
         viewModelScope.launch { repository.deleteByUri(track.uri) }
@@ -271,7 +306,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 delay(250)
                 _currentPositionMs.value = engine.getPositionMs()
                 if (!engine.isPlaying()) {
-                    stop()
+                    if (loopMode.value && fileUri.value != null) {
+                        restart()
+                    } else {
+                        stop()
+                    }
                     break
                 }
             }
