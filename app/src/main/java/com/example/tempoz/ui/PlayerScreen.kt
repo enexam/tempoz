@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -39,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -64,6 +66,7 @@ fun PlayerScreen(
     val durationMs by viewModel.durationMs.collectAsState()
     val currentPositionMs by viewModel.currentPositionMs.collectAsState()
     val loopMode by viewModel.loopMode.collectAsState()
+    val isAnalyzing by viewModel.isAnalyzing.collectAsState()
 
     var showTrackExplorer by remember { mutableStateOf(false) }
     var showMixer by remember { mutableStateOf(false) }
@@ -80,13 +83,25 @@ fun PlayerScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Track name
-        Text(
-            text = if (fileUri == null) "No track loaded" else fileName,
-            style = MaterialTheme.typography.titleLarge,
+        // Track name with analysis indicator
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center
-        )
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (fileUri == null) "No track loaded" else fileName,
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.width(8.dp))
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .size(24.dp)
+                    .alpha(if (isAnalyzing) 1f else 0f),
+                strokeWidth = 2.dp
+            )
+        }
 
         // Seek section
         Column(modifier = Modifier.fillMaxWidth()) {

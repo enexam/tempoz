@@ -10,5 +10,7 @@ data class TrackEntity(
     @ColumnInfo(name = "display_name") val displayName: String,
     @ColumnInfo(name = "bpm") val bpm: Int,
     @ColumnInfo(name = "beats_per_bar") val beatsPerBar: Int,
-    @ColumnInfo(name = "last_used_ms") val lastUsedMs: Long
+    @ColumnInfo(name = "last_used_ms") val lastUsedMs: Long,
+    @ColumnInfo(name = "detected_bpm") val detectedBpm: Int? = null,
+    @ColumnInfo(name = "beat_offset_frames") val beatOffsetFrames: Long? = null
 )

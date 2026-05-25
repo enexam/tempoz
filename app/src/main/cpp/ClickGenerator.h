@@ -15,11 +15,14 @@ public:
     /**
      * (Re)configure the generator. Safe to call before the first render.
      *
-     * @param bpm         beats per minute
-     * @param beatsPerBar number of beats in one bar (accent on beat 0)
-     * @param sampleRate  output sample rate in Hz
+     * @param bpm                beats per minute
+     * @param beatsPerBar        number of beats in one bar (accent on beat 0)
+     * @param sampleRate         output sample rate in Hz
+     * @param initialOffsetFrames frames to wait before the first beat fires;
+     *                           0 fires a beat on the very first rendered frame.
+     *                           Negative values are clamped to 0.
      */
-    void configure(int bpm, int beatsPerBar, int sampleRate);
+    void configure(int bpm, int beatsPerBar, int sampleRate, int64_t initialOffsetFrames = 0);
 
     /**
      * Fill [out] in-place with click samples mixed at [gain].

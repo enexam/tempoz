@@ -1,15 +1,16 @@
 #include "ClickGenerator.h"
+#include <algorithm>
 #include <cmath>
 
-void ClickGenerator::configure(int bpm, int beatsPerBar, int sampleRate) {
+void ClickGenerator::configure(int bpm, int beatsPerBar, int sampleRate, int64_t initialOffsetFrames) {
     mBpm = bpm;
     mBeatsPerBar = beatsPerBar;
     mSampleRate = sampleRate;
     mBeatIntervalFrames = static_cast<int64_t>(sampleRate) * 60 / bpm;
     mClickDurationFrames = static_cast<int>(kClickDurationSeconds * sampleRate);
 
-    // Reset beat state so the first frame of the next render fires a beat.
-    mFramesUntilNextBeat = 0;
+    // Apply the offset, clamped to >= 0. 0 fires a beat on the very first rendered frame.
+    mFramesUntilNextBeat = std::max(static_cast<int64_t>(0), initialOffsetFrames);
     mCurrentBeat = 0;
     mClickFramesRemaining = 0;
     mPhase = 0.0f;

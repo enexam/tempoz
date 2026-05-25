@@ -76,6 +76,13 @@ public:
     void setTrackVolume(float volume);
     void setClickVolume(float volume);
 
+    /**
+     * Set the absolute frame offset of the first beat in the audio file.
+     * Used by start(), resume(), and seekTo() to align the click track to the
+     * recording's natural beat grid.
+     */
+    void setFirstBeatOffset(int64_t frames);
+
     // oboe::AudioStreamDataCallback
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* oboeStream,
                                           void* audioData,
@@ -97,8 +104,22 @@ private:
     // File position (in output frames) saved by pause() for use by resume().
     uint64_t mPauseFrameOffset{0};
 
+    // Absolute frame position of the first beat in the audio file (from analysis).
+    // 0 means the click fires on the first rendered frame (default behaviour).
+    // Written on the main thread, read on the audio callback thread — must be atomic.
+    std::atomic<int64_t> mFirstBeatOffset{0};
+
     // Last values forwarded to mClickGenerator; 0 forces configure() on the
     // first onAudioReady call.
     int mLastBpm{0};
     int mLastBeatsPerBar{0};
+
+    /**
+     * Compute how many frames until the next beat fires, given that playback
+     * is about to start from @p currentFrameOffset.
+     *
+     * If currentFrameOffset < mFirstBeatOffset the pre-roll is the distance
+     * to the first beat. Otherwise we phase into the beat grid.
+     */
+    int64_t computeFramesUntilBeat(int64_t currentFrameOffset, int streamRate) const;
 };

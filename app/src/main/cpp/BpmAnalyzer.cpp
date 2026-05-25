@@ -364,6 +364,12 @@ BpmResult BpmAnalyzer::analyze(int fd, int64_t offset, int64_t length) {
         }
     }
 
+    // Normalize firstBeatFrames from the file's native sample rate to 48000 Hz,
+    // matching the rate used by AudioEngine's frame offsets.
+    if (sampleRate > 0 && sampleRate != 48000) {
+        firstBeatFrames = firstBeatFrames * 48000LL / sampleRate;
+    }
+
     LOGD("Analysis complete: bpm=%d firstBeatFrames=%lld", bestBpm, (long long)firstBeatFrames);
     return {bestBpm, firstBeatFrames};
 }

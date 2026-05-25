@@ -83,6 +83,10 @@ class AudioEngine {
         return nativeAnalyzeBpm(handle, fd, offset, length)
     }
 
+    fun setFirstBeatOffset(frames: Long) {
+        nativeSetFirstBeatOffset(handle, frames)
+    }
+
     // ---- parameter setters ----
 
     var bpm: Int = 120
@@ -123,6 +127,7 @@ class AudioEngine {
     external fun nativeGetPositionMs(handle: Long): Long
     external fun nativeSeekTo(handle: Long, positionMs: Long)
     external fun nativeAnalyzeBpm(handle: Long, fd: Int, offset: Long, length: Long): LongArray
+    external fun nativeSetFirstBeatOffset(handle: Long, frames: Long)
     external fun nativeSetBpm(handle: Long, bpm: Int)
     external fun nativeSetBeatsPerBar(handle: Long, beatsPerBar: Int)
     external fun nativeSetTrackVolume(handle: Long, volume: Float)

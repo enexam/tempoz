@@ -57,10 +57,14 @@ void AudioEngine::start() {
         mFileDecoder.start();
     }
 
-    // Configure the click generator with the stream's actual sample rate.
+    // Configure the click generator with the stream's actual sample rate,
+    // aligned to the beat grid at the current file position.
+    const int streamRate = mStream->getSampleRate();
     mClickGenerator.configure(mBpm.load(std::memory_order_relaxed),
                                mBeatsPerBar.load(std::memory_order_relaxed),
-                               mStream->getSampleRate());
+                               streamRate,
+                               computeFramesUntilBeat(
+                                   static_cast<int64_t>(mPauseFrameOffset), streamRate));
 
     mIsPlaying.store(true, std::memory_order_relaxed);
 
@@ -124,10 +128,14 @@ void AudioEngine::resume() {
         mFileDecoder.resume(mPauseFrameOffset);
     }
 
-    // Reconfigure click generator for the stream's sample rate.
+    // Reconfigure click generator for the stream's sample rate, aligned to
+    // the beat grid at the resumed file position.
+    const int resumeRate = mStream->getSampleRate();
     mClickGenerator.configure(mBpm.load(std::memory_order_relaxed),
                                mBeatsPerBar.load(std::memory_order_relaxed),
-                               mStream->getSampleRate());
+                               resumeRate,
+                               computeFramesUntilBeat(
+                                   static_cast<int64_t>(mPauseFrameOffset), resumeRate));
 
     mIsPlaying.store(true, std::memory_order_relaxed);
 
@@ -185,6 +193,30 @@ void AudioEngine::setClickVolume(float volume) {
     mClickVolume.store(volume, std::memory_order_relaxed);
 }
 
+void AudioEngine::setFirstBeatOffset(int64_t frames) {
+    mFirstBeatOffset.store(frames, std::memory_order_relaxed);
+}
+
+int64_t AudioEngine::computeFramesUntilBeat(int64_t currentFrameOffset, int streamRate) const {
+    const int bpm = mBpm.load(std::memory_order_relaxed);
+    // All frame offsets (mPauseFrameOffset, mFirstBeatOffset) are in 48 kHz units
+    // because FileDecoder is always opened at kDefaultSampleRate (no stream exists
+    // yet when loadFile() is called). Compute the delay at 48 kHz, then rescale
+    // to stream-rate units for ClickGenerator.
+    const int64_t beatInterval48 = static_cast<int64_t>(kDefaultSampleRate) * 60LL / bpm;
+
+    const int64_t elapsed = currentFrameOffset - mFirstBeatOffset.load(std::memory_order_relaxed);
+    int64_t delay48;
+    if (elapsed < 0) {
+        delay48 = -elapsed;
+    } else {
+        const int64_t mod = elapsed % beatInterval48;
+        delay48 = (mod == 0) ? 0 : beatInterval48 - mod;
+    }
+    // Convert to stream-rate frames.
+    return delay48 * streamRate / kDefaultSampleRate;
+}
+
 oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStream*/,
                                                     void* audioData,
                                                     int32_t numFrames) {
@@ -212,8 +244,12 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
     const int curBpm = mBpm.load(std::memory_order_relaxed);
     const int curBeatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
     if (curBpm != mLastBpm || curBeatsPerBar != mLastBeatsPerBar) {
+        const int64_t liveOffset = static_cast<int64_t>(mPauseFrameOffset)
+                                   + static_cast<int64_t>(mFileDecoder.getFramesConsumed());
+        const int liveRate = mStream->getSampleRate();
         mClickGenerator.configure(curBpm, curBeatsPerBar,
-                                  mStream->getSampleRate());
+                                  liveRate,
+                                  computeFramesUntilBeat(liveOffset, liveRate));
         mLastBpm = curBpm;
         mLastBeatsPerBar = curBeatsPerBar;
     }

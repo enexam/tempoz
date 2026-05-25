@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.tempoz.data.TempozDatabase
 import com.example.tempoz.data.TrackEntity
 import com.example.tempoz.data.TrackRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.delay
@@ -54,6 +55,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     val fileUri = MutableStateFlow<Uri?>(null)
     val fileName = MutableStateFlow("No file selected")
+    val isAnalyzing = MutableStateFlow(false)
     val bpm = MutableStateFlow(120)
     val beatsPerBar = MutableStateFlow(4)
     val trackVolume = MutableStateFlow(1.0f)
@@ -129,6 +131,31 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     lastUsedMs = System.currentTimeMillis()
                 )
             )
+        }
+        val capturedLength = length
+        viewModelScope.launch(Dispatchers.IO) {
+            isAnalyzing.value = true
+            val analysisPfd = context.contentResolver.openFileDescriptor(uri, "r")
+            if (analysisPfd != null) {
+                val result = engine.analyzeBpm(analysisPfd.fd, 0L, capturedLength)
+                analysisPfd.close()
+                if (result[0] > 0) {
+                    engine.setFirstBeatOffset(result[1])
+                    setBpm(result[0].toInt())
+                    repository.upsert(
+                        TrackEntity(
+                            uri = uri.toString(),
+                            displayName = name,
+                            bpm = result[0].toInt(),
+                            beatsPerBar = beatsPerBar.value,
+                            lastUsedMs = System.currentTimeMillis(),
+                            detectedBpm = result[0].toInt(),
+                            beatOffsetFrames = result[1]
+                        )
+                    )
+                }
+            }
+            isAnalyzing.value = false
         }
     }
 
@@ -275,12 +302,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * Loads [track] into the engine and updates BPM and beats per bar from the persisted values.
+     * Also restores the detected beat offset so the click is aligned to the beat grid.
      */
     fun selectTrack(track: TrackEntity) {
         bpm.value = track.bpm
         beatsPerBar.value = track.beatsPerBar
         engine.bpm = track.bpm
         engine.beatsPerBar = track.beatsPerBar
+        engine.setFirstBeatOffset(track.beatOffsetFrames ?: 0L)
         selectFile(getApplication(), Uri.parse(track.uri))
     }
 

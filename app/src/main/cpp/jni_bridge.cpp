@@ -98,6 +98,12 @@ Java_com_example_tempoz_AudioEngine_nativeSeekTo(
     reinterpret_cast<AudioEngine*>(handle)->seekTo(static_cast<int64_t>(positionMs));
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeSetFirstBeatOffset(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jlong frames) {
+    reinterpret_cast<AudioEngine*>(handle)->setFirstBeatOffset(static_cast<int64_t>(frames));
+}
+
 JNIEXPORT jlongArray JNICALL
 Java_com_example_tempoz_AudioEngine_nativeAnalyzeBpm(
         JNIEnv* env, jobject /*thiz*/,
