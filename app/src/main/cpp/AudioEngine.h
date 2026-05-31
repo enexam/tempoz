@@ -71,7 +71,7 @@ public:
      */
     void seekTo(int64_t positionMs);
 
-    void setBpm(int bpm);
+    void setBpm(double bpm);
     void setBeatsPerBar(int beatsPerBar);
     void setTrackVolume(float volume);
     void setClickVolume(float volume);
@@ -94,7 +94,7 @@ private:
 
     std::shared_ptr<oboe::AudioStream> mStream;
 
-    std::atomic<int>   mBpm{120};
+    std::atomic<double> mBpm{120.0};
     std::atomic<int>   mBeatsPerBar{4};
     std::atomic<float> mTrackVolume{1.0f};
     std::atomic<float> mClickVolume{1.0f};
@@ -111,7 +111,7 @@ private:
 
     // Last values forwarded to mClickGenerator; 0 forces configure() on the
     // first onAudioReady call.
-    int mLastBpm{0};
+    double mLastBpm{0.0};
     int mLastBeatsPerBar{0};
 
     /**

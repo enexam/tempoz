@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.tempoz.data.TrackEntity
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,7 +67,7 @@ fun TrackExplorerSheet(
                     ) {
                         ListItem(
                             headlineContent = { Text(track.displayName) },
-                            supportingContent = { Text("${track.bpm} BPM · ${track.beatsPerBar}/4") },
+                            supportingContent = { Text("${track.bpm.roundToInt()} BPM · ${track.beatsPerBar}/4") },
                             modifier = Modifier.clickable {
                                 onSelectTrack(track)
                                 onDismiss()

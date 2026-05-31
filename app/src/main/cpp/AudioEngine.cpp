@@ -1,6 +1,7 @@
 #include "AudioEngine.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include <android/log.h>
@@ -177,7 +178,7 @@ void AudioEngine::seekTo(int64_t positionMs) {
     }
 }
 
-void AudioEngine::setBpm(int bpm) {
+void AudioEngine::setBpm(double bpm) {
     mBpm.store(bpm, std::memory_order_relaxed);
 }
 
@@ -198,12 +199,13 @@ void AudioEngine::setFirstBeatOffset(int64_t frames) {
 }
 
 int64_t AudioEngine::computeFramesUntilBeat(int64_t currentFrameOffset, int streamRate) const {
-    const int bpm = mBpm.load(std::memory_order_relaxed);
+    const double bpm = mBpm.load(std::memory_order_relaxed);
     // All frame offsets (mPauseFrameOffset, mFirstBeatOffset) are in 48 kHz units
     // because FileDecoder is always opened at kDefaultSampleRate (no stream exists
     // yet when loadFile() is called). Compute the delay at 48 kHz, then rescale
     // to stream-rate units for ClickGenerator.
-    const int64_t beatInterval48 = static_cast<int64_t>(kDefaultSampleRate) * 60LL / bpm;
+    const int64_t beatInterval48 =
+            std::llround(static_cast<double>(kDefaultSampleRate) * 60.0 / bpm);
 
     const int64_t elapsed = currentFrameOffset - mFirstBeatOffset.load(std::memory_order_relaxed);
     int64_t delay48;
@@ -241,7 +243,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
     }
 
     // Reconfigure the click generator if BPM or beatsPerBar changed.
-    const int curBpm = mBpm.load(std::memory_order_relaxed);
+    const double curBpm = mBpm.load(std::memory_order_relaxed);
     const int curBeatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
     if (curBpm != mLastBpm || curBeatsPerBar != mLastBeatsPerBar) {
         const int64_t liveOffset = static_cast<int64_t>(mPauseFrameOffset)

@@ -56,7 +56,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     val fileUri = MutableStateFlow<Uri?>(null)
     val fileName = MutableStateFlow("No file selected")
     val isAnalyzing = MutableStateFlow(false)
-    val bpm = MutableStateFlow(120)
+    val bpm = MutableStateFlow(120.0)
     val beatsPerBar = MutableStateFlow(4)
     val trackVolume = MutableStateFlow(1.0f)
     val clickVolume = MutableStateFlow(0.8f)
@@ -145,18 +145,20 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 if (analysisPfd != null) {
                     val result = engine.analyzeBpm(analysisPfd.fd, 0L, capturedLength)
                     analysisPfd.close()
-                    if (result[0] > 0 && currentTrackUri == capturedUri) {
-                        engine.setFirstBeatOffset(result[1])
-                        setBpm(result[0].toInt())
+                    if (result[0] > 0.0 && currentTrackUri == capturedUri) {
+                        val detectedBeatsPerBar = result[2].toInt().takeIf { it > 0 } ?: 4
+                        engine.setFirstBeatOffset(result[1].toLong())
+                        setBpm(result[0])
+                        setBeatsPerBar(detectedBeatsPerBar)
                         repository.upsert(
                             TrackEntity(
                                 uri = capturedUri.toString(),
                                 displayName = name,
-                                bpm = result[0].toInt(),
-                                beatsPerBar = beatsPerBar.value,
+                                bpm = result[0],
+                                beatsPerBar = detectedBeatsPerBar,
                                 lastUsedMs = System.currentTimeMillis(),
-                                detectedBpm = result[0].toInt(),
-                                beatOffsetFrames = result[1]
+                                detectedBpm = result[0],
+                                beatOffsetFrames = result[1].toLong()
                             )
                         )
                     }
@@ -243,7 +245,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** Updates [bpm] and propagates the new value to the engine immediately. */
-    fun setBpm(value: Int) {
+    fun setBpm(value: Double) {
         bpm.value = value
         engine.bpm = value
     }

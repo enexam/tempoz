@@ -2,15 +2,15 @@
 #include <algorithm>
 #include <cmath>
 
-void ClickGenerator::configure(int bpm, int beatsPerBar, int sampleRate, int64_t initialOffsetFrames) {
+void ClickGenerator::configure(double bpm, int beatsPerBar, int sampleRate, int64_t initialOffsetFrames) {
     mBpm = bpm;
     mBeatsPerBar = beatsPerBar;
     mSampleRate = sampleRate;
-    mBeatIntervalFrames = static_cast<int64_t>(sampleRate) * 60 / bpm;
+    mBeatIntervalFrames = static_cast<double>(sampleRate) * 60.0 / bpm;
     mClickDurationFrames = static_cast<int>(kClickDurationSeconds * sampleRate);
 
     // Apply the offset, clamped to >= 0. 0 fires a beat on the very first rendered frame.
-    mFramesUntilNextBeat = std::max(static_cast<int64_t>(0), initialOffsetFrames);
+    mFramesUntilNextBeat = std::max(0.0, static_cast<double>(initialOffsetFrames));
     mCurrentBeat = 0;
     mClickFramesRemaining = 0;
     mPhase = 0.0f;
@@ -22,16 +22,17 @@ void ClickGenerator::render(float* out, int numFrames, int channels, float gain)
     const float sampleRateF = static_cast<float>(mSampleRate);
 
     for (int frame = 0; frame < numFrames; ++frame) {
-        // Fire a beat when the countdown reaches zero.
-        if (mFramesUntilNextBeat == 0) {
+        // Fire a beat when the countdown reaches zero. The fractional interval
+        // is accumulated (remainder carries over) so a non-integer BPM does not
+        // drift over time.
+        if (mFramesUntilNextBeat <= 0.0) {
             mFreq = (mCurrentBeat == 0) ? kAccentFreq : kNormalFreq;
             mCurrentBeat = (mCurrentBeat + 1) % mBeatsPerBar;
             mClickFramesRemaining = mClickDurationFrames;
             mPhase = 0.0f;
-            mFramesUntilNextBeat = mBeatIntervalFrames - 1;
-        } else {
-            --mFramesUntilNextBeat;
+            mFramesUntilNextBeat += mBeatIntervalFrames;
         }
+        mFramesUntilNextBeat -= 1.0;
 
         float sample = 0.0f;
         if (mClickFramesRemaining > 0) {

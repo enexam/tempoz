@@ -75,11 +75,11 @@ class AudioEngine {
 
     /**
      * Analyze the audio file identified by [fd, offset, length] and return
-     * a two-element array [detectedBpm, firstBeatFrames].
-     * Returns [0, 0] if the engine has not been created or analysis fails.
+     * a three-element array [detectedBpm (fractional), firstBeatFrames, beatsPerBar].
+     * Returns [0, 0, 0] if the engine has not been created or analysis fails.
      */
-    fun analyzeBpm(fd: Int, offset: Long, length: Long): LongArray {
-        if (handle == 0L) return LongArray(2)
+    fun analyzeBpm(fd: Int, offset: Long, length: Long): DoubleArray {
+        if (handle == 0L) return DoubleArray(3)
         return nativeAnalyzeBpm(handle, fd, offset, length)
     }
 
@@ -89,7 +89,7 @@ class AudioEngine {
 
     // ---- parameter setters ----
 
-    var bpm: Int = 120
+    var bpm: Double = 120.0
         set(value) {
             field = value
             nativeSetBpm(handle, value)
@@ -126,9 +126,9 @@ class AudioEngine {
     external fun nativeGetDurationMs(handle: Long): Long
     external fun nativeGetPositionMs(handle: Long): Long
     external fun nativeSeekTo(handle: Long, positionMs: Long)
-    external fun nativeAnalyzeBpm(handle: Long, fd: Int, offset: Long, length: Long): LongArray
+    external fun nativeAnalyzeBpm(handle: Long, fd: Int, offset: Long, length: Long): DoubleArray
     external fun nativeSetFirstBeatOffset(handle: Long, frames: Long)
-    external fun nativeSetBpm(handle: Long, bpm: Int)
+    external fun nativeSetBpm(handle: Long, bpm: Double)
     external fun nativeSetBeatsPerBar(handle: Long, beatsPerBar: Int)
     external fun nativeSetTrackVolume(handle: Long, volume: Float)
     external fun nativeSetClickVolume(handle: Long, volume: Float)

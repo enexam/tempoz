@@ -39,14 +39,14 @@ class TrackEntityTest {
         val first = TrackEntity(
             uri = "content://media/external/audio/1",
             displayName = "track.mp3",
-            bpm = 120,
+            bpm = 120.0,
             beatsPerBar = 4,
             lastUsedMs = 1000L
         )
         val second = TrackEntity(
             uri = "content://media/external/audio/1",
             displayName = "track.mp3",
-            bpm = 130,
+            bpm = 130.0,
             beatsPerBar = 3,
             lastUsedMs = 2000L
         )
@@ -58,14 +58,14 @@ class TrackEntityTest {
         val first = TrackEntity(
             uri = "content://media/external/audio/1",
             displayName = "a.mp3",
-            bpm = 120,
+            bpm = 120.0,
             beatsPerBar = 4,
             lastUsedMs = 1000L
         )
         val second = TrackEntity(
             uri = "content://media/external/audio/2",
             displayName = "b.mp3",
-            bpm = 120,
+            bpm = 120.0,
             beatsPerBar = 4,
             lastUsedMs = 2000L
         )

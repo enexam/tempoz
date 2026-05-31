@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import com.example.tempoz.PlaybackState
 import com.example.tempoz.PlaybackViewModel
 import androidx.compose.material3.MaterialTheme
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,8 +75,10 @@ fun PlayerScreen(
     var isDragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
 
-    // Local text state for BPM field to allow free typing before committing
-    var bpmText by remember(bpm) { mutableStateOf(bpm.toString()) }
+    // Local text state for BPM field to allow free typing before committing.
+    // Displayed rounded; the engine still plays the fractional detected tempo
+    // until the user edits it (manual edits are integer-valued).
+    var bpmText by remember(bpm) { mutableStateOf(bpm.roundToInt().toString()) }
 
     Column(
         modifier = modifier
@@ -144,8 +147,8 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Button(onClick = {
-                val next = (bpm - 1).coerceIn(40, 240)
-                viewModel.setBpm(next)
+                val next = (bpm.roundToInt() - 1).coerceIn(40, 240)
+                viewModel.setBpm(next.toDouble())
                 bpmText = next.toString()
             }) {
                 Text("-")
@@ -159,7 +162,7 @@ fun PlayerScreen(
                     bpmText = filtered
                     val parsed = filtered.toIntOrNull()
                     if (parsed != null) {
-                        viewModel.setBpm(parsed.coerceIn(40, 240))
+                        viewModel.setBpm(parsed.coerceIn(40, 240).toDouble())
                     }
                 },
                 label = { Text("BPM") },
@@ -169,8 +172,8 @@ fun PlayerScreen(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = {
-                val next = (bpm + 1).coerceIn(40, 240)
-                viewModel.setBpm(next)
+                val next = (bpm.roundToInt() + 1).coerceIn(40, 240)
+                viewModel.setBpm(next.toDouble())
                 bpmText = next.toString()
             }) {
                 Text("+")

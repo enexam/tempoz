@@ -4,11 +4,12 @@
 
 /**
  * Result of a BPM analysis pass.
- * bpm == 0 and firstBeatFrames == 0 indicates failure or a file too short to analyze.
+ * bpm == 0 indicates failure or a file too short to analyze.
  */
 struct BpmResult {
-    int     bpm;
-    int64_t firstBeatFrames;
+    double  bpm;             // fractional BPM; 0 indicates failure
+    int64_t firstBeatFrames; // first downbeat, in 48000 Hz frame units
+    int     beatsPerBar;
 };
 
 /**

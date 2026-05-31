@@ -112,7 +112,7 @@ Based on user review after Phase 1:
 - Track timeline (seek)
 - Next/Previous track buttons (between imported tracks) + loop
 - Add support for Android 12..16, or even 10..16
-- Import an audio file, user-provided signature, analyze and store BPM + timing offset of the recording (when to start click), store metadata
+- Import an audio file, analyze and store BPM + time signature + timing offset of the recording (when to start click), store metadata
 - Play an audio file with a automatic synced click based on saved metadata (automatic offset + BPM)
 
 ### Phase 3
@@ -124,7 +124,6 @@ Based on user review after Phase 1:
 
 ### Phase 4
 
-- Auto-detect signature
 - Battery optimization (if needed)
 - Color theme option (dark/light + accent color pick)
 - Prepare Google Play Store deployment (generate documentation, description, visuals)

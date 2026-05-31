@@ -22,7 +22,7 @@ public:
      *                           0 fires a beat on the very first rendered frame.
      *                           Negative values are clamped to 0.
      */
-    void configure(int bpm, int beatsPerBar, int sampleRate, int64_t initialOffsetFrames = 0);
+    void configure(double bpm, int beatsPerBar, int sampleRate, int64_t initialOffsetFrames = 0);
 
     /**
      * Fill [out] in-place with click samples mixed at [gain].
@@ -39,8 +39,9 @@ public:
     void render(float* out, int numFrames, int channels, float gain);
 
 private:
-    // Frames remaining until the next beat fires (0 = fire on next frame).
-    int64_t mFramesUntilNextBeat = 0;
+    // Frames remaining until the next beat fires (fractional; <= 0 = fire now).
+    // Fractional so the beat interval can be non-integer without drift.
+    double mFramesUntilNextBeat = 0.0;
     // 0-based index of the current beat within a bar.
     int mCurrentBeat = 0;
     // Frames of click envelope remaining for the ongoing click (0 = silent).
@@ -52,10 +53,10 @@ private:
     // Frequency of the current click (880 Hz accent or 660 Hz normal).
     float mFreq = 0.0f;
 
-    int mBpm = 120;
+    double mBpm = 120.0;
     int mBeatsPerBar = 4;
     int mSampleRate = 48000;
-    int64_t mBeatIntervalFrames = 24000; // sampleRate * 60 / bpm
+    double mBeatIntervalFrames = 24000.0; // sampleRate * 60 / bpm (fractional)
 
     static constexpr float kDecay = 80.0f;
     static constexpr float kAccentFreq = 880.0f;

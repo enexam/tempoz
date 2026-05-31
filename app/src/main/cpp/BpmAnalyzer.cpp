@@ -1,11 +1,12 @@
 #include "BpmAnalyzer.h"
 
+#include "bpm_dsp.h"
+
 #include <android/log.h>
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaExtractor.h>
 #include <media/NdkMediaFormat.h>
 
-#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -14,7 +15,8 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
 static constexpr int64_t kCodecTimeoutUs = 5000; // 5 ms
-static constexpr int     kMaxSeconds     = 30;
+static constexpr int     kMaxSeconds     = 60;
+static constexpr int     kWorkingRate    = 44100; // analysis rate (playground parity)
 
 // ---------------------------------------------------------------------------
 // PCM conversion helpers (mirrors FileDecoder::convertToFloat logic)
@@ -268,108 +270,40 @@ BpmResult BpmAnalyzer::analyze(int fd, int64_t offset, int64_t length) {
     cleanup();
 
     // -------------------------------------------------------------------------
-    // 4. Compute onset-strength envelope.
+    // 4. Resample the decoded mono to the analysis rate, then run the validated
+    //    DSP pipeline. bpm_dsp expects 44100 so the playground constants (STFT
+    //    2048/512, 500/200 Hz band cutoffs, etc.) apply unchanged.
     // -------------------------------------------------------------------------
-    const int kHopFrames = sampleRate / 100; // 10 ms hop
-    if (kHopFrames <= 0) {
-        LOGE("Invalid hop size (sampleRate=%d)", sampleRate);
-        return {0, 0};
-    }
-
-    const size_t totalFrames = monoSamples.size();
-    const size_t numHops     = totalFrames / static_cast<size_t>(kHopFrames);
-
-    if (numHops < 50) {
-        LOGD("Too few hops (%zu) — file too short for analysis", numHops);
-        return {0, 0};
-    }
-
-    // Compute RMS energy per hop (non-overlapping window = hop size).
-    std::vector<float> energy(numHops);
-    for (size_t i = 0; i < numHops; ++i) {
-        float sum = 0.0f;
-        const size_t start = i * static_cast<size_t>(kHopFrames);
-        for (int k = 0; k < kHopFrames; ++k) {
-            float s = monoSamples[start + static_cast<size_t>(k)];
-            sum += s * s;
-        }
-        energy[i] = std::sqrt(sum / static_cast<float>(kHopFrames));
-    }
-
-    // Onset strength = positive half-wave rectified first difference of energy.
-    std::vector<float> onset(numHops, 0.0f);
-    for (size_t i = 1; i < numHops; ++i) {
-        float diff = energy[i] - energy[i - 1];
-        onset[i] = (diff > 0.0f) ? diff : 0.0f;
-    }
-
-    // -------------------------------------------------------------------------
-    // 5. Autocorrelate onset envelope over lags corresponding to 40–240 BPM.
-    // -------------------------------------------------------------------------
-    const size_t N = numHops;
-    int   bestBpm  = 0;
-    float bestVal  = -1.0f;
-
-    for (int bpmCandidate = 40; bpmCandidate <= 240; ++bpmCandidate) {
-        // lag in hops: lag = sampleRate * 60 / (bpm * kHopFrames)
-        int lag = (sampleRate * 60) / (bpmCandidate * kHopFrames);
-        if (lag < 1 || static_cast<size_t>(lag) >= N) continue;
-
-        // Dot product of onset[0..N-lag-1] and onset[lag..N-1].
-        float dot = 0.0f;
-        const size_t len = N - static_cast<size_t>(lag);
-        for (size_t i = 0; i < len; ++i) {
-            dot += onset[i] * onset[i + static_cast<size_t>(lag)];
-        }
-
-        // Gaussian weight: exp(-0.5 * ((bpm - 120) / 40)^2)
-        float z = static_cast<float>(bpmCandidate - 120) / 40.0f;
-        float weight = std::exp(-0.5f * z * z);
-        float weighted = dot * weight;
-
-        if (weighted > bestVal) {
-            bestVal = weighted;
-            bestBpm = bpmCandidate;
+    std::vector<float> work;
+    if (sampleRate == kWorkingRate) {
+        work.swap(monoSamples);
+    } else {
+        const size_t inN  = monoSamples.size();
+        const size_t outN = inN * static_cast<size_t>(kWorkingRate)
+                          / static_cast<size_t>(sampleRate);
+        work.resize(outN);
+        const double ratio = static_cast<double>(sampleRate) / kWorkingRate;
+        for (size_t i = 0; i < outN; ++i) {
+            const double srcPos = static_cast<double>(i) * ratio;
+            const size_t j      = static_cast<size_t>(srcPos);
+            const float  a      = monoSamples[j];
+            const float  b      = (j + 1 < inN) ? monoSamples[j + 1] : a;
+            work[i] = a + static_cast<float>(srcPos - static_cast<double>(j)) * (b - a);
         }
     }
 
-    if (bestBpm == 0 || bestVal <= 0.0f) {
-        LOGD("Autocorrelation found no valid BPM candidate");
-        return {0, 0};
+    const DspResult dsp = analyzeBpmDsp(work, kWorkingRate);
+    if (!(dsp.bpm > 0.0)) {
+        LOGD("DSP analysis found no tempo");
+        return {0.0, 0, 4};
     }
 
-    // -------------------------------------------------------------------------
-    // 6. First beat: first onset above mean + 1.5 * stddev.
-    // -------------------------------------------------------------------------
-    float mean = 0.0f;
-    for (float v : onset) mean += v;
-    mean /= static_cast<float>(N);
+    // Convert the first-beat offset from the 44100 analysis rate to the 48000 Hz
+    // frame units used by AudioEngine.
+    const int64_t firstBeatFrames =
+            dsp.firstBeatFrames * 48000LL / static_cast<int64_t>(kWorkingRate);
 
-    float variance = 0.0f;
-    for (float v : onset) {
-        float d = v - mean;
-        variance += d * d;
-    }
-    variance /= static_cast<float>(N);
-    float stddev = std::sqrt(variance);
-
-    int64_t firstBeatFrames = 0;
-    if (stddev > 0.0f) {
-        float threshold = mean + 1.5f * stddev;
-        for (size_t i = 0; i < N; ++i) {
-            if (onset[i] > threshold) {
-                firstBeatFrames = static_cast<int64_t>(i) * static_cast<int64_t>(kHopFrames);
-                break;
-            }
-        }
-    }
-
-    // Normalize firstBeatFrames from the file's native sample rate to 48000 Hz,
-    // matching the rate used by AudioEngine's frame offsets.
-    if (sampleRate > 0 && sampleRate != 48000) {
-        firstBeatFrames = firstBeatFrames * 48000LL / sampleRate;
-    }
-
-    LOGD("Analysis complete: bpm=%d firstBeatFrames=%lld", bestBpm, (long long)firstBeatFrames);
-    return {bestBpm, firstBeatFrames};
+    LOGD("Analysis complete: bpm=%.2f firstBeatFrames=%lld beatsPerBar=%d",
+         dsp.bpm, static_cast<long long>(firstBeatFrames), dsp.beatsPerBar);
+    return {dsp.bpm, firstBeatFrames, dsp.beatsPerBar};
 }

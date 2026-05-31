@@ -16,7 +16,7 @@ class DeleteTrackTest {
     private fun makeTrack(uri: String) = TrackEntity(
         uri = uri,
         displayName = "track.mp3",
-        bpm = 120,
+        bpm = 120.0,
         beatsPerBar = 4,
         lastUsedMs = 0L
     )

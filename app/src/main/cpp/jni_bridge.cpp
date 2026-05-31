@@ -32,8 +32,8 @@ Java_com_example_tempoz_AudioEngine_nativeStop(JNIEnv* /*env*/, jobject /*thiz*/
 
 JNIEXPORT void JNICALL
 Java_com_example_tempoz_AudioEngine_nativeSetBpm(
-        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jint bpm) {
-    reinterpret_cast<AudioEngine*>(handle)->setBpm(static_cast<int>(bpm));
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jdouble bpm) {
+    reinterpret_cast<AudioEngine*>(handle)->setBpm(static_cast<double>(bpm));
 }
 
 JNIEXPORT void JNICALL
@@ -104,7 +104,7 @@ Java_com_example_tempoz_AudioEngine_nativeSetFirstBeatOffset(
     reinterpret_cast<AudioEngine*>(handle)->setFirstBeatOffset(static_cast<int64_t>(frames));
 }
 
-JNIEXPORT jlongArray JNICALL
+JNIEXPORT jdoubleArray JNICALL
 Java_com_example_tempoz_AudioEngine_nativeAnalyzeBpm(
         JNIEnv* env, jobject /*thiz*/,
         jlong /*handle*/, jint fd, jlong offset, jlong length) {
@@ -112,11 +112,12 @@ Java_com_example_tempoz_AudioEngine_nativeAnalyzeBpm(
             static_cast<int>(fd),
             static_cast<int64_t>(offset),
             static_cast<int64_t>(length));
-    jlongArray arr = env->NewLongArray(2);
+    jdoubleArray arr = env->NewDoubleArray(3);
     if (arr) {
-        jlong values[2] = {static_cast<jlong>(result.bpm),
-                           static_cast<jlong>(result.firstBeatFrames)};
-        env->SetLongArrayRegion(arr, 0, 2, values);
+        jdouble values[3] = {static_cast<jdouble>(result.bpm),
+                             static_cast<jdouble>(result.firstBeatFrames),
+                             static_cast<jdouble>(result.beatsPerBar)};
+        env->SetDoubleArrayRegion(arr, 0, 3, values);
     }
     return arr;
 }
