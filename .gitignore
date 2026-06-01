@@ -1,0 +1,14 @@
+*.iml
+.gradle
+local.properties
+.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+/test_stdout*.txt
+/test_stderr*.txt
+
+# DSP scratch + copyrighted audio used only for local analysis — never commit
+/playground
