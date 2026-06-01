@@ -43,6 +43,24 @@ FileDecoder::~FileDecoder() {
 
 bool FileDecoder::open(int fd, int64_t offset, int64_t length,
                        int targetSampleRate, int targetChannels) {
+    // Release any previously opened file so open() is reentrant across track
+    // switches. Without this, each switch leaks a MediaCodec/extractor instance —
+    // and codec instances are a limited system resource, so a few switches would
+    // start failing to open.
+    stop();
+    if (mCodec) {
+        AMediaCodec_delete(mCodec);
+        mCodec = nullptr;
+    }
+    if (mExtractor) {
+        AMediaExtractor_delete(mExtractor);
+        mExtractor = nullptr;
+    }
+    mStarted = false;
+    mFifo.reset();
+    mDecoderDone.store(false, std::memory_order_relaxed);
+    mFramesConsumed.store(0, std::memory_order_relaxed);
+
     mTargetSampleRate = targetSampleRate;
     mTargetChannels   = targetChannels;
 
@@ -149,19 +167,6 @@ bool FileDecoder::open(int fd, int64_t offset, int64_t length,
 // start() / stop()
 // ---------------------------------------------------------------------------
 
-void FileDecoder::start() {
-    if (!mCodec || mStarted) return;
-    mStopRequested.store(false, std::memory_order_relaxed);
-    mDecoderDone.store(false, std::memory_order_relaxed);
-    media_status_t status = AMediaCodec_start(mCodec);
-    if (status != AMEDIA_OK) {
-        LOGE("AMediaCodec_start failed: %d", status);
-        return;
-    }
-    mStarted = true;
-    launchDecodeThread();
-}
-
 void FileDecoder::launchDecodeThread() {
     mDecodeThread = std::thread(&FileDecoder::decodeLoop, this);
 }
@@ -171,35 +176,36 @@ void FileDecoder::stop() {
     if (mDecodeThread.joinable()) {
         mDecodeThread.join();
     }
-    if (mCodec && mStarted) {
-        AMediaCodec_stop(mCodec);
-        mStarted = false;
-    }
+    // The codec is deliberately left in its Executing (flushed) state rather than
+    // AMediaCodec_stop()'d: stopping moves it to Uninitialized, after which
+    // AMediaCodec_start() fails (-10000 AMEDIA_ERROR_UNKNOWN) without a full
+    // reconfigure — which manifested as silent playback after pause→resume /
+    // stop→play. startAt() flushes it instead; it is torn down only in open()
+    // (which reconfigures a fresh codec) and the destructor.
 }
 
-void FileDecoder::pause() {
-    // Signal and join the decode thread, then empty the FIFO.
+void FileDecoder::startAt(uint64_t frameOffset) {
+    // Invariant: never launch a decode thread over a joinable one. Signal and
+    // join any running thread first. This is what makes seeking (which routes
+    // through here) crash-free — the previous design assigned a new std::thread
+    // over a live one, which calls std::terminate().
     mStopRequested.store(true, std::memory_order_relaxed);
     if (mDecodeThread.joinable()) {
         mDecodeThread.join();
     }
-    // Flush FIFO by aligning read counter to write counter.
-    if (mFifo) {
-        mFifo->setReadCounter(mFifo->getWriteCounter());
-    }
-}
+    if (!mCodec) return;
 
-void FileDecoder::resume(uint64_t frameOffset) {
-    // Convert frame offset to microseconds for the extractor seek.
+    // Seek the extractor to the requested position.
     int64_t seekUs = static_cast<int64_t>(
             static_cast<double>(frameOffset) * 1e6 / static_cast<double>(mTargetSampleRate));
     AMediaExtractor_seekTo(mExtractor, seekUs, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
 
-    // Flush/reset codec. If codec is not yet running (e.g. after stop()), start it first.
+    // Bring the codec to a clean Executing state at the new position. If it is
+    // not running yet (after open() or stop()) start it; otherwise flush.
     if (!mStarted) {
         media_status_t status = AMediaCodec_start(mCodec);
         if (status != AMEDIA_OK) {
-            LOGE("AMediaCodec_start in resume() failed: %d", status);
+            LOGE("startAt: AMediaCodec_start failed: %d", status);
             return;
         }
         mStarted = true;
@@ -207,24 +213,26 @@ void FileDecoder::resume(uint64_t frameOffset) {
         AMediaCodec_flush(mCodec);
     }
 
-    // Clear the FIFO.
-    if (mFifo) {
-        mFifo->setReadCounter(mFifo->getWriteCounter());
+    // Clear the FIFO under the lock so an in-flight read() on the audio thread
+    // cannot observe a half-updated counter. The producer (decode thread) was
+    // just joined; the lock is held only around the counter write (microseconds),
+    // never around the join above.
+    {
+        std::lock_guard<std::mutex> lock(mFifoMutex);
+        if (mFifo) {
+            mFifo->setReadCounter(mFifo->getWriteCounter());
+        }
     }
 
-    // Reset decode state.
+    // Reset decode/resampler state for the new position.
     mFramesConsumed.store(0, std::memory_order_relaxed);
     mDecoderDone.store(false, std::memory_order_relaxed);
     mResamplePhase = 0.0;
     std::fill(mLastFrame.begin(), mLastFrame.end(), 0.0f);
 
-    // Restart the decode thread.
+    // Launch a fresh decode thread.
     mStopRequested.store(false, std::memory_order_relaxed);
     launchDecodeThread();
-}
-
-void FileDecoder::seekToStart() {
-    resume(0);
 }
 
 uint64_t FileDecoder::getFramesConsumed() {
@@ -240,6 +248,17 @@ int64_t FileDecoder::getDurationFrames() {
 // ---------------------------------------------------------------------------
 
 void FileDecoder::read(float* out, int numFrames) {
+    // Never block the audio thread: if a reseed is flushing the FIFO (startAt
+    // holds the lock), output silence for this block. This is a second line of
+    // defense so FIFO access stays safe even if the Oboe stream stop() barrier
+    // in AudioEngine were ever to return while this callback is still in flight.
+    std::unique_lock<std::mutex> lock(mFifoMutex, std::try_to_lock);
+    if (!lock.owns_lock() || !mFifo) {
+        memset(out, 0, static_cast<size_t>(numFrames * mTargetChannels) * sizeof(float));
+        mFramesConsumed.fetch_add(static_cast<uint64_t>(numFrames), std::memory_order_relaxed);
+        return;
+    }
+
     int32_t got = mFifo->read(out, numFrames);
     if (got < numFrames) {
         // Starved — fill remainder with silence.

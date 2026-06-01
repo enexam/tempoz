@@ -1,13 +1,14 @@
 package com.example.tempoz
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts.GetContent
+import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -40,14 +41,22 @@ class MainActivity : ComponentActivity() {
                     Manifest.permission.READ_EXTERNAL_STORAGE
                 }
 
-                val fileLauncher = rememberLauncherForActivityResult(GetContent()) { uri ->
+                val fileLauncher = rememberLauncherForActivityResult(OpenDocument()) { uri ->
                     uri ?: return@rememberLauncherForActivityResult
+                    // Persist read access so the track can be reopened after an app
+                    // restart/reinstall. ACTION_OPEN_DOCUMENT (unlike GET_CONTENT)
+                    // returns a URI whose grant is persistable.
+                    runCatching {
+                        context.contentResolver.takePersistableUriPermission(
+                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    }
                     viewModel.selectFile(context, uri)
                 }
 
                 val permissionLauncher = rememberLauncherForActivityResult(RequestPermission()) { granted ->
                     if (granted) {
-                        fileLauncher.launch("audio/*")
+                        fileLauncher.launch(arrayOf("audio/*"))
                     }
                 }
 

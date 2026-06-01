@@ -1,35 +1,48 @@
 package com.example.tempoz.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.Replay
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedIconButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -37,17 +50,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.tempoz.PlaybackState
 import com.example.tempoz.PlaybackViewModel
-import androidx.compose.material3.MaterialTheme
 import kotlin.math.roundToInt
+
+private val ClickSoundOptions = listOf("Click", "Rim", "Wood block", "Beep", "Cowbell", "Hi-hat")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,245 +83,342 @@ fun PlayerScreen(
     val currentPositionMs by viewModel.currentPositionMs.collectAsState()
     val loopMode by viewModel.loopMode.collectAsState()
     val isAnalyzing by viewModel.isAnalyzing.collectAsState()
+    val beatOffsetFrames by viewModel.beatOffsetFrames.collectAsState()
 
-    var showTrackExplorer by remember { mutableStateOf(false) }
+    val hasTrack = fileUri != null
+    val isPlaying = playbackState == PlaybackState.PLAYING
+    val currentEntity = remember(tracks, fileUri) {
+        tracks.find { it.uri == fileUri?.toString() }
+    }
+
+    var showLibrary by remember { mutableStateOf(false) }
+    var showTrackSettings by remember { mutableStateOf(false) }
+    var showClick by remember { mutableStateOf(false) }
     var showMixer by remember { mutableStateOf(false) }
+    var showSpeed by remember { mutableStateOf(false) }
 
     var isDragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
 
-    // Local text state for BPM field to allow free typing before committing.
-    // Displayed rounded; the engine still plays the fractional detected tempo
-    // until the user edits it (manual edits are integer-valued).
-    var bpmText by remember(bpm) { mutableStateOf(bpm.roundToInt().toString()) }
+    // UI-only state for features without an audio backend yet.
+    var clickSound by rememberSaveable { mutableStateOf(ClickSoundOptions.first()) }
+    var playbackSpeed by rememberSaveable { mutableFloatStateOf(1.0f) }
+
+    val scheme = MaterialTheme.colorScheme
+
+    fun nudgeBpm(delta: Int) {
+        viewModel.setBpm((bpm.roundToInt() + delta).coerceIn(40, 240).toDouble())
+    }
+
+    fun scaleBpm(factor: Double) {
+        viewModel.setBpm((bpm * factor).roundToInt().coerceIn(40, 240).toDouble())
+    }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Track name with analysis indicator
+        // ---- Top bar : wordmark + analysis status ----
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(scheme.primary, CircleShape)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "Tempoz",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = scheme.onBackground,
+                )
+            }
+            if (isAnalyzing) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = scheme.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "analyzing",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        // ---- Centerpiece + meta (flexible, centered) ----
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // − / Pulse Core / + : the steppers live in the room beside the ring.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilledTonalIconButton(onClick = { nudgeBpm(-1) }, modifier = Modifier.size(52.dp)) {
+                    Icon(Icons.Rounded.Remove, contentDescription = "Slower")
+                }
+                PulseCore(
+                    bpm = bpm,
+                    beatsPerBar = beatsPerBar,
+                    isPlaying = isPlaying,
+                    firstBeatOffsetFrames = beatOffsetFrames,
+                    audiblePositionMs = { viewModel.audiblePositionMs() },
+                    onTap = { viewModel.tapTempo() },
+                    ringSize = 196.dp,
+                )
+                FilledTonalIconButton(onClick = { nudgeBpm(+1) }, modifier = Modifier.size(52.dp)) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Faster")
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // Quick tempo ratios: half / dotted / dotted / double.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TempoFactorButton("÷2") { scaleBpm(0.5) }
+                TempoFactorButton("÷1.5") { scaleBpm(1.0 / 1.5) }
+                TempoFactorButton("×1.5") { scaleBpm(1.5) }
+                TempoFactorButton("×2") { scaleBpm(2.0) }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
             Text(
-                text = if (fileUri == null) "No track loaded" else fileName,
+                text = if (hasTrack) fileName else "No track loaded",
                 style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center
+                color = scheme.onBackground,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.width(8.dp))
-            CircularProgressIndicator(
-                modifier = Modifier
-                    .size(24.dp)
-                    .alpha(if (isAnalyzing) 1f else 0f),
-                strokeWidth = 2.dp
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = if (hasTrack) {
+                    "${bpm.roundToInt()} bpm · $beatsPerBar/4" +
+                        if (currentEntity?.detectedBpm != null) " · auto-detected" else ""
+                } else {
+                    "Import a track to begin"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
 
-        // Seek section
+        // ---- Seek ----
         Column(modifier = Modifier.fillMaxWidth()) {
             val sliderValue = if (isDragging) dragValue
-                else (currentPositionMs.toFloat() / durationMs.coerceAtLeast(1L).toFloat())
+            else (currentPositionMs.toFloat() / durationMs.coerceAtLeast(1L).toFloat())
             Slider(
-                value = sliderValue,
-                onValueChange = { newValue ->
-                    isDragging = true
-                    dragValue = newValue
-                },
+                value = sliderValue.coerceIn(0f, 1f),
+                onValueChange = { isDragging = true; dragValue = it },
                 onValueChangeFinished = {
                     viewModel.seekTo((dragValue * durationMs).toLong())
                     isDragging = false
                 },
                 valueRange = 0f..1f,
                 enabled = durationMs > 0L,
-                modifier = Modifier.fillMaxWidth()
+                colors = SliderDefaults.colors(
+                    thumbColor = scheme.primary,
+                    activeTrackColor = scheme.primary,
+                    inactiveTrackColor = scheme.surfaceVariant,
+                ),
+                modifier = Modifier.fillMaxWidth(),
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                val elapsedSec = (currentPositionMs / 1000L).toInt()
-                val remainingSec = ((durationMs - currentPositionMs).coerceAtLeast(0L) / 1000L).toInt()
-                Text(
-                    text = "${elapsedSec / 60}:${(elapsedSec % 60).toString().padStart(2, '0')}",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(
-                    text = "-${remainingSec / 60}:${(remainingSec % 60).toString().padStart(2, '0')}",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Text(formatTime(currentPositionMs), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                Text("-" + formatTime((durationMs - currentPositionMs).coerceAtLeast(0L)), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
         }
 
-        // BPM row
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Button(onClick = {
-                val next = (bpm.roundToInt() - 1).coerceIn(40, 240)
-                viewModel.setBpm(next.toDouble())
-                bpmText = next.toString()
-            }) {
-                Text("-")
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedTextField(
-                value = bpmText,
-                onValueChange = { input ->
-                    // Reject non-numeric characters
-                    val filtered = input.filter { it.isDigit() }
-                    bpmText = filtered
-                    val parsed = filtered.toIntOrNull()
-                    if (parsed != null) {
-                        viewModel.setBpm(parsed.coerceIn(40, 240).toDouble())
-                    }
-                },
-                label = { Text("BPM") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = {
-                val next = (bpm.roundToInt() + 1).coerceIn(40, 240)
-                viewModel.setBpm(next.toDouble())
-                bpmText = next.toString()
-            }) {
-                Text("+")
-            }
-        }
+        Spacer(Modifier.height(10.dp))
 
-        // Beats per bar row
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            for (n in 2..8) {
-                FilterChip(
-                    selected = (n == beatsPerBar),
-                    onClick = { viewModel.setBeatsPerBar(n) },
-                    label = { Text(n.toString()) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Play controls row: [prev] [restart] [play/pause] [next]
+        // ---- Transport ----
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Prev track button
-            FilledTonalIconButton(
-                onClick = { viewModel.prevTrack() },
-                enabled = tracks.size > 1,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous track")
+            IconButton(onClick = { viewModel.prevTrack() }, enabled = tracks.size > 1, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous track", modifier = Modifier.size(28.dp))
             }
-            Spacer(Modifier.width(8.dp))
-            // Restart button
-            FilledTonalIconButton(
-                onClick = { viewModel.restart() },
-                enabled = fileUri != null,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Filled.Replay, contentDescription = "Restart")
+            IconButton(onClick = { viewModel.restart() }, enabled = hasTrack, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Rounded.Replay, contentDescription = "Restart", modifier = Modifier.size(26.dp))
             }
-            Spacer(Modifier.width(8.dp))
-            // Play/pause button
             FilledIconButton(
                 onClick = {
                     when (playbackState) {
                         PlaybackState.STOPPED -> viewModel.play()
                         PlaybackState.PLAYING -> viewModel.pause()
-                        PlaybackState.PAUSED  -> viewModel.resume()
+                        PlaybackState.PAUSED -> viewModel.resume()
                     }
                 },
-                enabled = fileUri != null,
-                modifier = Modifier.size(64.dp)
+                enabled = hasTrack,
+                modifier = Modifier.size(74.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = scheme.primary,
+                    contentColor = scheme.onPrimary,
+                ),
             ) {
                 Icon(
-                    imageVector = if (playbackState == PlaybackState.PLAYING) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (playbackState == PlaybackState.PLAYING) "Pause" else "Play",
-                    modifier = Modifier.size(32.dp)
+                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    modifier = Modifier.size(36.dp),
                 )
             }
-            Spacer(Modifier.width(8.dp))
-            // Next track button
-            FilledTonalIconButton(
-                onClick = { viewModel.nextTrack() },
-                enabled = tracks.size > 1,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Filled.SkipNext, contentDescription = "Next track")
+            IconButton(onClick = { viewModel.nextTrack() }, enabled = tracks.size > 1, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Rounded.SkipNext, contentDescription = "Next track", modifier = Modifier.size(28.dp))
+            }
+            IconButton(onClick = { viewModel.toggleLoop() }, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    Icons.Rounded.Repeat,
+                    contentDescription = if (loopMode) "Loop on" else "Loop off",
+                    tint = if (loopMode) scheme.primary else scheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp),
+                )
             }
         }
 
-        // Loop toggle row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (loopMode) {
-                FilledTonalIconButton(
-                    onClick = { viewModel.toggleLoop() },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(Icons.Filled.Repeat, contentDescription = "Loop on")
-                }
-            } else {
-                OutlinedIconButton(
-                    onClick = { viewModel.toggleLoop() },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(Icons.Filled.Repeat, contentDescription = "Loop off")
-                }
-            }
-        }
+        Spacer(Modifier.height(20.dp))
 
-        // Bottom action row
+        // ---- Quick-access dock ----
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            OutlinedButton(onClick = { showTrackExplorer = true }) {
-                Icon(Icons.Filled.LibraryMusic, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Tracks")
-            }
-            OutlinedButton(onClick = { showMixer = true }) {
-                Icon(Icons.Filled.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Mixer")
-            }
+            DockButton(Icons.Rounded.LibraryMusic, "Tracks", Modifier.weight(1f)) { showLibrary = true }
+            DockButton(Icons.Rounded.Tune, "Track", Modifier.weight(1f), enabled = hasTrack) { showTrackSettings = true }
+            DockButton(Icons.Rounded.MusicNote, "Click", Modifier.weight(1f)) { showClick = true }
+            DockButton(Icons.Rounded.GraphicEq, "Mixer", Modifier.weight(1f)) { showMixer = true }
+            DockButton(Icons.Rounded.Speed, "Speed", Modifier.weight(1f)) { showSpeed = true }
         }
     }
 
-    if (showTrackExplorer) {
+    if (showLibrary) {
         TrackExplorerSheet(
             tracks = tracks,
+            currentUri = fileUri?.toString(),
             onSelectTrack = { viewModel.selectTrack(it) },
             onDeleteTrack = { viewModel.deleteTrack(it) },
             onImport = onPickFile,
-            onDismiss = { showTrackExplorer = false }
+            onDismiss = { showLibrary = false },
         )
     }
-
+    if (showTrackSettings) {
+        TrackSettingsSheet(
+            trackName = if (hasTrack) fileName else null,
+            bpm = bpm,
+            beatsPerBar = beatsPerBar,
+            detectedBpm = currentEntity?.detectedBpm,
+            beatOffsetFrames = beatOffsetFrames,
+            onBpmChange = { viewModel.setBpm(it) },
+            onBeatsChange = { viewModel.setBeatsPerBar(it) },
+            onBeatOffsetChange = { viewModel.setBeatOffsetFrames(it) },
+            onSave = { viewModel.saveCurrentTrackParams() },
+            onDismiss = { showTrackSettings = false },
+        )
+    }
+    if (showClick) {
+        ClickSoundSheet(
+            selected = clickSound,
+            options = ClickSoundOptions,
+            onSelect = { clickSound = it },
+            onDismiss = { showClick = false },
+        )
+    }
     if (showMixer) {
         MixerSheet(
             trackVolume = trackVolume,
             clickVolume = clickVolume,
             onTrackVolumeChange = { viewModel.setTrackVolume(it) },
             onClickVolumeChange = { viewModel.setClickVolume(it) },
-            onDismiss = { showMixer = false }
+            onDismiss = { showMixer = false },
         )
     }
+    if (showSpeed) {
+        SpeedSheet(
+            speed = playbackSpeed,
+            onSpeedChange = { playbackSpeed = it },
+            onDismiss = { showSpeed = false },
+        )
+    }
+}
+
+@Composable
+private fun TempoFactorButton(label: String, onClick: () -> Unit) {
+    FilledTonalButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+        modifier = Modifier.heightIn(min = 40.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable
+private fun DockButton(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = scheme.surfaceContainerHigh,
+            modifier = Modifier.size(48.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    icon,
+                    contentDescription = label,
+                    tint = if (enabled) scheme.onSurface else scheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (enabled) scheme.onSurfaceVariant else scheme.onSurfaceVariant.copy(alpha = 0.4f),
+        )
+    }
+}
+
+private fun formatTime(ms: Long): String {
+    val totalSec = (ms / 1000L).toInt()
+    return "${totalSec / 60}:${(totalSec % 60).toString().padStart(2, '0')}"
 }

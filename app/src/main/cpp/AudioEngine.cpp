@@ -1,8 +1,8 @@
 #include "AudioEngine.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstring>
+#include <ctime>
 
 #include <android/log.h>
 
@@ -10,77 +10,26 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
-static constexpr int kDefaultSampleRate  = 48000;
-static constexpr int kDefaultChannelCount = 2;
+// The engine runs entirely at this rate. Oboe's sample-rate conversion presents
+// the callback at kSampleRate regardless of the device's native rate, so every
+// frame count in the engine (playhead, duration, click grid, decoder output) is
+// in the same unit.
+static constexpr int kSampleRate   = 48000;
+static constexpr int kChannelCount = 2;
+
+// CLOCK_MONOTONIC now, in nanoseconds. Backed by the vDSO on Android, so it is
+// safe to call from the audio callback (no syscall, no lock).
+static int64_t nowMonotonicNanos() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+}
 
 AudioEngine::AudioEngine() = default;
 
 AudioEngine::~AudioEngine() {
-    stop();
-}
-
-void AudioEngine::loadFile(int fd, int64_t offset, int64_t length) {
-    mPauseFrameOffset = 0;
-    int sampleRate   = kDefaultSampleRate;
-    int channelCount = kDefaultChannelCount;
-
-    if (mStream) {
-        sampleRate   = mStream->getSampleRate();
-        channelCount = mStream->getChannelCount();
-    }
-
-    bool ok = mFileDecoder.open(fd, offset, length, sampleRate, channelCount);
-    if (!ok) {
-        LOGE("FileDecoder::open failed");
-        return;
-    }
-    mFileLoaded.store(true, std::memory_order_relaxed);
-}
-
-void AudioEngine::start() {
-    // Build and open the Oboe stream.
-    oboe::AudioStreamBuilder builder;
-    builder.setDataCallback(this)
-           ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-           ->setSharingMode(oboe::SharingMode::Exclusive)
-           ->setFormat(oboe::AudioFormat::Float)
-           ->setChannelCount(kDefaultChannelCount)
-           ->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium);
-
-    oboe::Result result = builder.openStream(mStream);
-    if (result != oboe::Result::OK) {
-        LOGE("openStream failed: %s", oboe::convertToText(result));
-        return;
-    }
-
-    // Start the file decoder if a file has been loaded.
-    if (mFileLoaded.load(std::memory_order_relaxed)) {
-        mFileDecoder.start();
-    }
-
-    // Configure the click generator with the stream's actual sample rate,
-    // aligned to the beat grid at the current file position.
-    const int streamRate = mStream->getSampleRate();
-    mClickGenerator.configure(mBpm.load(std::memory_order_relaxed),
-                               mBeatsPerBar.load(std::memory_order_relaxed),
-                               streamRate,
-                               computeFramesUntilBeat(
-                                   static_cast<int64_t>(mPauseFrameOffset), streamRate));
-
-    mIsPlaying.store(true, std::memory_order_relaxed);
-
-    result = mStream->start();
-    if (result != oboe::Result::OK) {
-        LOGE("stream->start() failed: %s", oboe::convertToText(result));
-        mIsPlaying.store(false, std::memory_order_relaxed);
-    }
-}
-
-void AudioEngine::stop() {
     mIsPlaying.store(false, std::memory_order_relaxed);
-
     mFileDecoder.stop();
-
     if (mStream) {
         mStream->stop();
         mStream->close();
@@ -88,94 +37,202 @@ void AudioEngine::stop() {
     }
 }
 
-void AudioEngine::pause() {
-    mIsPlaying.store(false, std::memory_order_relaxed);
+bool AudioEngine::openStreamIfNeeded() {
+    if (mStream) return true;
 
-    // Close the stream first so the audio callback has exited before
-    // the FIFO read pointer is mutated inside mFileDecoder.pause().
-    if (mStream) {
-        mStream->requestStop();
-        mStream->close();
-        mStream.reset();
-    }
-
-    // Accumulate absolute position: offset from previous resumes plus
-    // frames played since the last resume.  FileDecoder::resume() resets
-    // mFramesConsumed to 0, so we must add rather than overwrite.
-    mPauseFrameOffset += mFileDecoder.getFramesConsumed();
-
-    // Pause the decoder (joins thread, flushes FIFO).
-    mFileDecoder.pause();
-}
-
-void AudioEngine::resume() {
-    // Rebuild the Oboe stream with the same parameters as start().
     oboe::AudioStreamBuilder builder;
     builder.setDataCallback(this)
-           ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-           ->setSharingMode(oboe::SharingMode::Exclusive)
+           ->setSharingMode(oboe::SharingMode::Shared)
+           ->setPerformanceMode(oboe::PerformanceMode::None)
            ->setFormat(oboe::AudioFormat::Float)
-           ->setChannelCount(kDefaultChannelCount)
+           ->setChannelCount(kChannelCount)
+           ->setSampleRate(kSampleRate)
            ->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium);
 
     oboe::Result result = builder.openStream(mStream);
-    if (result != oboe::Result::OK) {
-        LOGE("resume: openStream failed: %s", oboe::convertToText(result));
+    if (result != oboe::Result::OK || !mStream) {
+        LOGE("openStream failed: %s", oboe::convertToText(result));
+        mStream.reset();
+        return false;
+    }
+    if (mStream->getSampleRate() != kSampleRate) {
+        // Should not happen with SR conversion enabled, but log if a backend
+        // ever ignores it — the playhead math assumes kSampleRate.
+        LOGE("stream opened at %d Hz, expected %d", mStream->getSampleRate(), kSampleRate);
+    }
+    return true;
+}
+
+void AudioEngine::loadFile(int fd, int64_t offset, int64_t length) {
+    // Fully stop any current playback before swapping the file.
+    stopInternal(/*resetPosition=*/true);
+
+    bool ok = mFileDecoder.open(fd, offset, length, kSampleRate, kChannelCount);
+    if (!ok) {
+        LOGE("FileDecoder::open failed");
+        mFileLoaded.store(false, std::memory_order_relaxed);
         return;
     }
+    mFileLoaded.store(true, std::memory_order_relaxed);
+    mPositionFrames.store(0, std::memory_order_relaxed);
+    mEnded.store(false, std::memory_order_relaxed);
+}
 
-    // Seek the decoder to the saved position and restart its thread.
-    if (mFileLoaded.load(std::memory_order_relaxed)) {
-        mFileDecoder.resume(mPauseFrameOffset);
+void AudioEngine::play() {
+    if (!mFileLoaded.load(std::memory_order_relaxed)) return;
+    if (mIsPlaying.load(std::memory_order_relaxed)) return;
+    if (!openStreamIfNeeded()) return;
+
+    mEnded.store(false, std::memory_order_relaxed);
+
+    // Seed the decoder at the current playhead and prime the FIFO. Safe to touch
+    // the FIFO: the stream is not started, so the callback is not consuming.
+    mFileDecoder.startAt(static_cast<uint64_t>(mPositionFrames.load(std::memory_order_relaxed)));
+
+    // Seed the interpolation snapshot so getAudiblePositionMs() is sane before
+    // the first callback fires, and force a latency refresh.
+    mLastCbFrames.store(mPositionFrames.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    mLastCbNanos.store(nowMonotonicNanos(), std::memory_order_relaxed);
+    mLatencyStampNanos = 0;
+
+    // Set playing before start() so the first callback renders audio.
+    mIsPlaying.store(true, std::memory_order_relaxed);
+    oboe::Result result = mStream->start();
+    if (result != oboe::Result::OK) {
+        LOGE("stream start failed: %s", oboe::convertToText(result));
+        mIsPlaying.store(false, std::memory_order_relaxed);
+        mFileDecoder.stop();
+    }
+}
+
+void AudioEngine::resume() {
+    play();
+}
+
+void AudioEngine::pause() {
+    if (!mIsPlaying.load(std::memory_order_relaxed)) return;
+
+    // Stop the callback from touching the FIFO, then stop the stream as a
+    // barrier (it blocks until the callback has exited). The stream stays open.
+    mIsPlaying.store(false, std::memory_order_relaxed);
+    if (mStream) {
+        mStream->stop();
+    }
+    // Free the decode thread/codec; the playhead is left frozen where the audio
+    // thread last advanced it.
+    mFileDecoder.stop();
+}
+
+void AudioEngine::seekTo(int64_t positionMs) {
+    int64_t frame = positionMs * kSampleRate / 1000;
+    if (frame < 0) frame = 0;
+    const int64_t durFrames = mFileDecoder.getDurationFrames();
+    if (durFrames > 0 && frame > durFrames) frame = durFrames;
+
+    const bool wasPlaying = mIsPlaying.load(std::memory_order_relaxed);
+
+    // Drop out of the callback's FIFO path and stop the stream before any reseed.
+    if (wasPlaying) {
+        mIsPlaying.store(false, std::memory_order_relaxed);
+        if (mStream) {
+            mStream->stop();
+        }
     }
 
-    // Reconfigure click generator for the stream's sample rate, aligned to
-    // the beat grid at the resumed file position.
-    const int resumeRate = mStream->getSampleRate();
-    mClickGenerator.configure(mBpm.load(std::memory_order_relaxed),
-                               mBeatsPerBar.load(std::memory_order_relaxed),
-                               resumeRate,
-                               computeFramesUntilBeat(
-                                   static_cast<int64_t>(mPauseFrameOffset), resumeRate));
+    mEnded.store(false, std::memory_order_relaxed);
+    mPositionFrames.store(frame, std::memory_order_relaxed);
 
-    mIsPlaying.store(true, std::memory_order_relaxed);
-
-    result = mStream->start();
-    if (result != oboe::Result::OK) {
-        LOGE("resume: stream->start() failed: %s", oboe::convertToText(result));
-        mIsPlaying.store(false, std::memory_order_relaxed);
+    if (wasPlaying) {
+        // Reseed the decoder at the new position (callback not running → FIFO
+        // mutation is safe) and resume the same open stream.
+        mFileDecoder.startAt(static_cast<uint64_t>(frame));
+        mIsPlaying.store(true, std::memory_order_relaxed);
+        if (mStream) {
+            oboe::Result result = mStream->start();
+            if (result != oboe::Result::OK) {
+                LOGE("seek: stream start failed: %s", oboe::convertToText(result));
+                mIsPlaying.store(false, std::memory_order_relaxed);
+                mFileDecoder.stop();
+            }
+        }
+    } else {
+        // Paused or stopped: just halt the decoder so no stale thread holds the
+        // old position. The next play()/resume() seeds at the new playhead.
+        mFileDecoder.stop();
     }
 }
 
 void AudioEngine::seekToStart() {
-    mPauseFrameOffset = 0;
-    stop();
-    mFileDecoder.seekToStart();
+    seekTo(0);
+}
+
+void AudioEngine::stop() {
+    stopInternal(/*resetPosition=*/true);
+}
+
+void AudioEngine::stopInternal(bool resetPosition) {
+    mIsPlaying.store(false, std::memory_order_relaxed);
+    if (mStream) {
+        mStream->stop();  // keep the stream open for reuse; just stop it
+    }
+    mFileDecoder.stop();
+    mEnded.store(false, std::memory_order_relaxed);
+    if (resetPosition) {
+        mPositionFrames.store(0, std::memory_order_relaxed);
+    }
 }
 
 bool AudioEngine::isPlaying() {
     return mIsPlaying.load(std::memory_order_relaxed);
 }
 
+bool AudioEngine::isEnded() {
+    return mEnded.load(std::memory_order_relaxed);
+}
+
 int64_t AudioEngine::getDurationMs() {
-    return mFileDecoder.getDurationFrames() * 1000LL / kDefaultSampleRate;
+    return mFileDecoder.getDurationFrames() * 1000LL / kSampleRate;
 }
 
 int64_t AudioEngine::getPositionMs() {
-    return static_cast<int64_t>(
-            (mPauseFrameOffset + mFileDecoder.getFramesConsumed()) * 1000LL / kDefaultSampleRate);
+    int64_t frames = mPositionFrames.load(std::memory_order_relaxed);
+    const int64_t durFrames = mFileDecoder.getDurationFrames();
+    if (durFrames > 0 && frames > durFrames) frames = durFrames;
+    return frames * 1000LL / kSampleRate;
 }
 
-void AudioEngine::seekTo(int64_t positionMs) {
-    bool wasPlaying = mIsPlaying.load(std::memory_order_relaxed);
-    if (wasPlaying) {
-        stop();
+int64_t AudioEngine::getAudiblePositionMs() {
+    // When not actively playing the playhead is frozen; no interpolation.
+    if (!mIsPlaying.load(std::memory_order_relaxed) || !mStream) {
+        return getPositionMs();
     }
-    mPauseFrameOffset = static_cast<uint64_t>(positionMs * kDefaultSampleRate / 1000);
-    mFileDecoder.resume(mPauseFrameOffset);
-    if (wasPlaying) {
-        start();
+
+    const int64_t lastFrames = mLastCbFrames.load(std::memory_order_relaxed);
+    const int64_t lastNanos  = mLastCbNanos.load(std::memory_order_relaxed);
+    const int64_t now = nowMonotonicNanos();
+    int64_t elapsedNs = now - lastNanos;
+    if (elapsedNs < 0) elapsedNs = 0;
+
+    // Interpolate the write playhead forward to 'now'.
+    double frames = static_cast<double>(lastFrames)
+                    + static_cast<double>(elapsedNs) * static_cast<double>(kSampleRate) / 1e9;
+
+    // Refresh the cached output latency at most ~twice a second.
+    if (now - mLatencyStampNanos > 500000000LL) {
+        auto latency = mStream->calculateLatencyMillis();
+        if (latency) mCachedLatencyMs = latency.value();
+        mLatencyStampNanos = now;
     }
+
+    // Subtract output latency to get the frame currently at the speaker.
+    frames -= mCachedLatencyMs * static_cast<double>(kSampleRate) / 1000.0;
+    if (frames < 0.0) frames = 0.0;
+
+    const int64_t durFrames = mFileDecoder.getDurationFrames();
+    if (durFrames > 0 && frames > static_cast<double>(durFrames)) {
+        frames = static_cast<double>(durFrames);
+    }
+    return static_cast<int64_t>(frames * 1000.0 / static_cast<double>(kSampleRate));
 }
 
 void AudioEngine::setBpm(double bpm) {
@@ -198,78 +255,59 @@ void AudioEngine::setFirstBeatOffset(int64_t frames) {
     mFirstBeatOffset.store(frames, std::memory_order_relaxed);
 }
 
-int64_t AudioEngine::computeFramesUntilBeat(int64_t currentFrameOffset, int streamRate) const {
-    const double bpm = mBpm.load(std::memory_order_relaxed);
-    // All frame offsets (mPauseFrameOffset, mFirstBeatOffset) are in 48 kHz units
-    // because FileDecoder is always opened at kDefaultSampleRate (no stream exists
-    // yet when loadFile() is called). Compute the delay at 48 kHz, then rescale
-    // to stream-rate units for ClickGenerator.
-    const int64_t beatInterval48 =
-            std::llround(static_cast<double>(kDefaultSampleRate) * 60.0 / bpm);
-
-    const int64_t elapsed = currentFrameOffset - mFirstBeatOffset.load(std::memory_order_relaxed);
-    int64_t delay48;
-    if (elapsed < 0) {
-        delay48 = -elapsed;
-    } else {
-        const int64_t mod = elapsed % beatInterval48;
-        delay48 = (mod == 0) ? 0 : beatInterval48 - mod;
-    }
-    // Convert to stream-rate frames.
-    return delay48 * streamRate / kDefaultSampleRate;
-}
-
 oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStream*/,
                                                     void* audioData,
                                                     int32_t numFrames) {
-    const int channels = kDefaultChannelCount;
+    const int channels = kChannelCount;
     const int totalSamples = numFrames * channels;
-
     float* output = static_cast<float*>(audioData);
 
-    // Snapshot volumes once for this callback.
+    const bool playing = mIsPlaying.load(std::memory_order_relaxed)
+                         && !mEnded.load(std::memory_order_relaxed);
+
+    // When not playing (paused mid-stop, or ended) output silence and do not
+    // touch the FIFO or advance the playhead. This is also the guard that keeps
+    // the FIFO single-consumer during a reseed.
+    if (!playing) {
+        std::memset(output, 0, static_cast<size_t>(totalSamples) * sizeof(float));
+        return oboe::DataCallbackResult::Continue;
+    }
+
+    const int64_t startFrame = mPositionFrames.load(std::memory_order_relaxed);
     const float trackVol = mTrackVolume.load(std::memory_order_relaxed);
     const float clickVol = mClickVolume.load(std::memory_order_relaxed);
+    const double bpm = mBpm.load(std::memory_order_relaxed);
+    const int beatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
+    const int64_t firstBeat = mFirstBeatOffset.load(std::memory_order_relaxed);
 
-    // Stack buffers for intermediate PCM.
     float fileBuf[totalSamples];
     float clickBuf[totalSamples];
 
-    // Read decoded file audio (silence if no file loaded or decoder starved).
     if (mFileLoaded.load(std::memory_order_relaxed)) {
         mFileDecoder.read(fileBuf, numFrames);
     } else {
-        memset(fileBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
+        std::memset(fileBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
     }
 
-    // Reconfigure the click generator if BPM or beatsPerBar changed.
-    const double curBpm = mBpm.load(std::memory_order_relaxed);
-    const int curBeatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
-    if (curBpm != mLastBpm || curBeatsPerBar != mLastBeatsPerBar) {
-        const int64_t liveOffset = static_cast<int64_t>(mPauseFrameOffset)
-                                   + static_cast<int64_t>(mFileDecoder.getFramesConsumed());
-        const int liveRate = mStream->getSampleRate();
-        mClickGenerator.configure(curBpm, curBeatsPerBar,
-                                  liveRate,
-                                  computeFramesUntilBeat(liveOffset, liveRate));
-        mLastBpm = curBpm;
-        mLastBeatsPerBar = curBeatsPerBar;
-    }
+    // Click is a pure function of the absolute playhead, so it stays locked to
+    // the file's beat grid across seeks and pauses.
+    std::memset(clickBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
+    mClickGenerator.render(clickBuf, numFrames, channels, startFrame, bpm, beatsPerBar,
+                           firstBeat, kSampleRate, 1.0f);
 
-    // ClickGenerator::render sums into existing content — zero first.
-    memset(clickBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
-    mClickGenerator.render(clickBuf, numFrames, channels, 1.0f);
-
-    // Mix and clamp.
     for (int i = 0; i < totalSamples; ++i) {
-        float mixed = trackVol * fileBuf[i] + clickVol * clickBuf[i];
-        output[i] = std::clamp(mixed, -1.0f, 1.0f);
+        output[i] = std::clamp(trackVol * fileBuf[i] + clickVol * clickBuf[i], -1.0f, 1.0f);
     }
 
-    // Stop when the file track reaches EOF.
+    // Advance the single playhead, then detect end-of-file.
+    const int64_t newPos = startFrame + numFrames;
+    mPositionFrames.store(newPos, std::memory_order_relaxed);
+    // Snapshot (playhead, time) so the UI can interpolate the audible position
+    // between callbacks.
+    mLastCbFrames.store(newPos, std::memory_order_relaxed);
+    mLastCbNanos.store(nowMonotonicNanos(), std::memory_order_relaxed);
     if (mFileLoaded.load(std::memory_order_relaxed) && mFileDecoder.isEOF()) {
-        mIsPlaying.store(false, std::memory_order_relaxed);
-        return oboe::DataCallbackResult::Stop;
+        mEnded.store(true, std::memory_order_relaxed);
     }
 
     return oboe::DataCallbackResult::Continue;

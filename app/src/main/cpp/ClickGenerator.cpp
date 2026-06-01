@@ -1,53 +1,41 @@
 #include "ClickGenerator.h"
-#include <algorithm>
+
 #include <cmath>
+#include <cstddef>
 
-void ClickGenerator::configure(double bpm, int beatsPerBar, int sampleRate, int64_t initialOffsetFrames) {
-    mBpm = bpm;
-    mBeatsPerBar = beatsPerBar;
-    mSampleRate = sampleRate;
-    mBeatIntervalFrames = static_cast<double>(sampleRate) * 60.0 / bpm;
-    mClickDurationFrames = static_cast<int>(kClickDurationSeconds * sampleRate);
+void ClickGenerator::render(float* out, int numFrames, int channels,
+                            int64_t startFrame, double bpm, int beatsPerBar,
+                            int64_t firstBeatOffset, int sampleRate, float gain) const {
+    if (bpm <= 0.0 || beatsPerBar <= 0 || sampleRate <= 0) return;
 
-    // Apply the offset, clamped to >= 0. 0 fires a beat on the very first rendered frame.
-    mFramesUntilNextBeat = std::max(0.0, static_cast<double>(initialOffsetFrames));
-    mCurrentBeat = 0;
-    mClickFramesRemaining = 0;
-    mPhase = 0.0f;
-    mFreq = 0.0f;
-}
-
-void ClickGenerator::render(float* out, int numFrames, int channels, float gain) {
+    const double interval = static_cast<double>(sampleRate) * 60.0 / bpm;  // frames per beat
+    const int clickDur = static_cast<int>(kClickDurationSeconds * sampleRate);
     const float twoPi = 2.0f * static_cast<float>(M_PI);
-    const float sampleRateF = static_cast<float>(mSampleRate);
+    const float sr = static_cast<float>(sampleRate);
 
-    for (int frame = 0; frame < numFrames; ++frame) {
-        // Fire a beat when the countdown reaches zero. The fractional interval
-        // is accumulated (remainder carries over) so a non-integer BPM does not
-        // drift over time.
-        if (mFramesUntilNextBeat <= 0.0) {
-            mFreq = (mCurrentBeat == 0) ? kAccentFreq : kNormalFreq;
-            mCurrentBeat = (mCurrentBeat + 1) % mBeatsPerBar;
-            mClickFramesRemaining = mClickDurationFrames;
-            mPhase = 0.0f;
-            mFramesUntilNextBeat += mBeatIntervalFrames;
-        }
-        mFramesUntilNextBeat -= 1.0;
+    for (int i = 0; i < numFrames; ++i) {
+        const int64_t abs = startFrame + i;
+        if (abs < firstBeatOffset) continue;  // before the first beat: silence
 
-        float sample = 0.0f;
-        if (mClickFramesRemaining > 0) {
-            // Elapsed time in seconds since this click started.
-            float t = static_cast<float>(mClickDurationFrames - mClickFramesRemaining) / sampleRateF;
-            float envelope = gain * std::exp(-kDecay * t);
-            sample = envelope * std::sin(mPhase);
-            mPhase += twoPi * mFreq / sampleRateF;
-            if (mPhase >= twoPi) mPhase -= twoPi;
-            --mClickFramesRemaining;
-        }
+        // Index of the beat at or before this frame, and that beat's onset.
+        // Both are derived purely from the absolute position (see BeatGrid.kt),
+        // so onsets never accumulate rounding error and seeking cannot shift them.
+        const double rel = static_cast<double>(abs - firstBeatOffset);
+        const int64_t k = static_cast<int64_t>(std::floor(rel / interval));
+        const int64_t onset = firstBeatOffset + std::llround(static_cast<double>(k) * interval);
 
-        // Write to all channels (interleaved).
-        for (int ch = 0; ch < channels; ++ch) {
-            out[frame * channels + ch] += sample;
-        }
+        const int64_t elapsed = abs - onset;
+        if (elapsed < 0 || elapsed >= clickDur) continue;  // between clicks
+
+        const float freq = ((k % beatsPerBar) == 0) ? kAccentFreq : kNormalFreq;
+        const float t = static_cast<float>(elapsed) / sr;
+        const float env = gain * std::exp(-kDecay * t);
+        // Phase derived from elapsed frames keeps the burst continuous without
+        // any oscillator state carried across blocks.
+        const float phase = twoPi * freq * static_cast<float>(elapsed) / sr;
+        const float sample = env * std::sin(phase);
+
+        float* frameOut = out + static_cast<std::ptrdiff_t>(i) * channels;
+        for (int c = 0; c < channels; ++c) frameOut[c] += sample;
     }
 }

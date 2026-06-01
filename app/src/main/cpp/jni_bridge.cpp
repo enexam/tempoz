@@ -22,7 +22,7 @@ Java_com_example_tempoz_AudioEngine_nativeLoadFile(
 
 JNIEXPORT void JNICALL
 Java_com_example_tempoz_AudioEngine_nativeStart(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
-    reinterpret_cast<AudioEngine*>(handle)->start();
+    reinterpret_cast<AudioEngine*>(handle)->play();
 }
 
 JNIEXPORT void JNICALL
@@ -74,6 +74,11 @@ Java_com_example_tempoz_AudioEngine_nativeIsPlaying(JNIEnv* /*env*/, jobject /*t
     return reinterpret_cast<AudioEngine*>(handle)->isPlaying() ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_example_tempoz_AudioEngine_nativeIsEnded(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    return reinterpret_cast<AudioEngine*>(handle)->isEnded() ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_example_tempoz_AudioEngine_nativeDestroy(
         JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
@@ -90,6 +95,12 @@ JNIEXPORT jlong JNICALL
 Java_com_example_tempoz_AudioEngine_nativeGetPositionMs(
         JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
     return static_cast<jlong>(reinterpret_cast<AudioEngine*>(handle)->getPositionMs());
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_tempoz_AudioEngine_nativeGetAudiblePositionMs(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    return static_cast<jlong>(reinterpret_cast<AudioEngine*>(handle)->getAudiblePositionMs());
 }
 
 JNIEXPORT void JNICALL

@@ -61,12 +61,22 @@ class AudioEngine {
         return nativeIsPlaying(handle)
     }
 
+    /** True once the loaded file has played through to its end. */
+    fun isEnded(): Boolean {
+        return nativeIsEnded(handle)
+    }
+
     fun getDurationMs(): Long {
         return nativeGetDurationMs(handle)
     }
 
     fun getPositionMs(): Long {
         return nativeGetPositionMs(handle)
+    }
+
+    /** Position of the frame currently being heard (latency-compensated). */
+    fun getAudiblePositionMs(): Long {
+        return nativeGetAudiblePositionMs(handle)
     }
 
     fun seekTo(positionMs: Long) {
@@ -123,8 +133,10 @@ class AudioEngine {
     external fun nativeResume(handle: Long)
     external fun nativeSeekToStart(handle: Long)
     external fun nativeIsPlaying(handle: Long): Boolean
+    external fun nativeIsEnded(handle: Long): Boolean
     external fun nativeGetDurationMs(handle: Long): Long
     external fun nativeGetPositionMs(handle: Long): Long
+    external fun nativeGetAudiblePositionMs(handle: Long): Long
     external fun nativeSeekTo(handle: Long, positionMs: Long)
     external fun nativeAnalyzeBpm(handle: Long, fd: Int, offset: Long, length: Long): DoubleArray
     external fun nativeSetFirstBeatOffset(handle: Long, frames: Long)

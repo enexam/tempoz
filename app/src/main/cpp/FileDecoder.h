@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -15,11 +16,24 @@
  * float32 PCM into an oboe::FifoBuffer for lock-free consumption on the
  * audio thread.
  *
+ * Lifecycle is built from two primitives that have one hard invariant: a decode
+ * thread is never launched over a still-joinable thread.
+ *   - startAt(frame) — (re)start decoding from a frame position. Always stops
+ *     and joins any running decode thread first, so it doubles as the seek
+ *     primitive.
+ *   - stop() — stop and join the decode thread and halt the codec.
+ *
  * Thread model:
- *   - open() / start() / stop() / pause() / resume() are called on the main thread.
- *   - read() / isEOF() / getFramesConsumed() are called on the audio callback thread
- *     (no allocs).
- *   - An internal decode thread writes to the FifoBuffer.
+ *   - open() / startAt() / stop() are called on the main thread only, serialized
+ *     by the owner (AudioEngine, driven by the ViewModel). They are never called
+ *     concurrently with each other.
+ *   - read() / isEOF() / getFramesConsumed() are called on the audio callback
+ *     thread (no allocations).
+ *   - The internal decode thread is the sole producer into the FifoBuffer.
+ *   - startAt()/open() mutate the FifoBuffer read/write counters; the owner must
+ *     guarantee the audio callback is NOT running at that time (the engine stops
+ *     the Oboe stream before any reseed). This keeps the FIFO strictly
+ *     single-producer / single-consumer.
  *
  * Fd lifetime: AMediaExtractor dups the file descriptor internally, so the
  * caller may close the fd immediately after open() returns.
@@ -34,6 +48,10 @@ public:
      * Sets up AMediaExtractor + AMediaCodec for the first audio track.
      * Returns true on success.
      *
+     * Reentrant: releases any previously opened file (joins the decode thread,
+     * deletes the prior codec/extractor) before opening the new one, so it is
+     * safe to call on every track switch without leaking codec instances.
+     *
      * @param fd               file descriptor (may be closed after open() returns)
      * @param offset           byte offset of the data source within fd
      * @param length           byte length of the data source
@@ -43,31 +61,21 @@ public:
     bool open(int fd, int64_t offset, int64_t length,
               int targetSampleRate, int targetChannels);
 
-    /** Launch the decode thread. Call after open(). */
-    void start();
+    /**
+     * Start (or restart) decoding so that the next frames read() returns begin
+     * at [frameOffset]. Stops and joins any running decode thread, seeks the
+     * extractor, flushes/starts the codec, clears the FIFO, resets decode state,
+     * and launches a fresh decode thread.
+     *
+     * Also the seek primitive: call it with any frame position. Resets
+     * mFramesConsumed to zero.
+     *
+     * @param frameOffset target position in output frames (at targetSampleRate)
+     */
+    void startAt(uint64_t frameOffset);
 
-    /** Signal the decode thread to stop and block until it joins. */
+    /** Signal the decode thread to stop, join it, and halt the codec. */
     void stop();
-
-    /**
-     * Stop the decode thread and flush the FIFO to empty.
-     * The codec remains open (Executing state). Call resume() to restart.
-     */
-    void pause();
-
-    /**
-     * Seek to frameOffset in the audio file, flush the codec and FIFO, and
-     * restart the decode thread. If the codec is not currently running
-     * (e.g. after stop()), it is started first.
-     *
-     * Resets mFramesConsumed to zero.
-     *
-     * @param frameOffset target position in output frames (at mTargetSampleRate)
-     */
-    void resume(uint64_t frameOffset);
-
-    /** Seek back to the beginning of the file. Equivalent to resume(0). */
-    void seekToStart();
 
     /**
      * Called from the audio thread. Drains up to numFrames frames from the
@@ -90,7 +98,7 @@ public:
 
     /**
      * Returns the total number of frames consumed via read() since the last
-     * open() or resume(). Safe to call from any thread.
+     * open() or startAt(). Safe to call from any thread.
      */
     uint64_t getFramesConsumed();
 
@@ -105,8 +113,8 @@ private:
     /** Decode loop executed by mDecodeThread. */
     void decodeLoop();
 
-    /** Launch the decode thread without the mStarted guard. Must only be called
-     *  when the codec is in Executing state and no thread is running. */
+    /** Launch the decode thread. Must only be called when the codec is in
+     *  Executing state and no decode thread is running (joined). */
     void launchDecodeThread();
 
     /**
@@ -133,15 +141,19 @@ private:
 
     // ---- ring buffer ----
     std::unique_ptr<oboe::FifoBuffer> mFifo;
+    // Guards the FIFO counter flush in startAt() against an in-flight read() on
+    // the audio thread. read() only ever try_locks (never blocks the audio
+    // thread); startAt() holds it solely around the microsecond counter write.
+    std::mutex mFifoMutex;
 
     // ---- decode thread ----
     std::thread           mDecodeThread;
     std::atomic<bool>     mStopRequested{false};
     std::atomic<bool>     mDecoderDone{false};  // codec EOS reached + flushed
-    bool                  mStarted{false};       // true between start() and stop()
+    bool                  mStarted{false};       // codec is in Executing state
 
     // ---- playback position ----
-    // Incremented by numFrames on every read() call. Reset on open()/resume().
+    // Incremented by numFrames on every read() call. Reset on open()/startAt().
     std::atomic<uint64_t> mFramesConsumed{0};
 
     // Total duration in output frames; set in open() from AMEDIAFORMAT_KEY_DURATION.

@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.IBinder
 import android.support.v4.media.session.MediaSessionCompat
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 
 class PlaybackService : Service() {
@@ -41,8 +40,7 @@ class PlaybackService : Service() {
                     nm.createNotificationChannel(channel)
                 }
 
-                val isFirstStart = mediaSession == null
-                if (isFirstStart) {
+                if (mediaSession == null) {
                     mediaSession = MediaSessionCompat(this, "TempozSession").also {
                         it.isActive = true
                     }
@@ -50,11 +48,16 @@ class PlaybackService : Service() {
 
                 val notification = buildNotification(trackName, isPlaying)
 
-                if (isFirstStart) {
-                    startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-                } else {
-                    NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification)
-                }
+                // Every startForegroundService() must be matched by startForeground()
+                // within the system timeout, or it throws ForegroundServiceDidNotStartIn
+                // TimeException. Since the ViewModel re-issues ACTION_START on each
+                // play/pause, always call startForeground() — with the same id it just
+                // updates the existing notification.
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
             }
             ACTION_STOP -> {
                 mediaSession?.release()

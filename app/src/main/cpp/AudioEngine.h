@@ -10,77 +10,76 @@
 
 /**
  * Oboe audio engine that mixes a decoded audio file with a synthesized
- * metronome click track.
+ * metronome click, driven by a single deterministic state machine.
  *
- * Thread safety: all public setters are safe to call from any thread.
- * onAudioReady runs on the Oboe audio thread.
+ * Design invariants — these are what make playback reliable:
+ *   - The Oboe stream is opened once and kept open for the engine's lifetime;
+ *     pause/resume/seek only stop()/start() it, never close it. Repeated
+ *     open/close of the stream is what made the seeker fail.
+ *   - The stream is fixed at kSampleRate via Oboe's built-in sample-rate
+ *     conversion, so every frame count — playhead, duration, click grid — is in
+ *     one unit and the click cannot drift against the file on non-48k devices.
+ *   - There is exactly one playhead, mPositionFrames: advanced by the audio
+ *     thread while playing, written by seek/stop only while the stream is
+ *     stopped (callback not running). STOPPED → 0, PAUSED → frozen.
+ *   - The audio callback reads the decoder FIFO only when mIsPlaying is true.
+ *     Every reseed sets mIsPlaying=false and stops the stream first, so the FIFO
+ *     stays strictly single-producer / single-consumer.
+ *   - The callback never touches mStream and never returns Stop; lifecycle is
+ *     owned by the main thread.
+ *
+ * All public methods are called from the main thread, serialized by the
+ * ViewModel. onAudioReady runs on the Oboe audio thread.
  */
 class AudioEngine : public oboe::AudioStreamDataCallback {
 public:
     AudioEngine();
     ~AudioEngine() override;
 
-    /**
-     * Load an audio file from the given file descriptor.
-     * Uses 48000 Hz / 2 channels as defaults before the first stream is opened.
-     * Must be called before start().
-     */
+    /** Load an audio file. Stops any current playback and resets the playhead. */
     void loadFile(int fd, int64_t offset, int64_t length);
 
-    /** Open and start the Oboe stream, the decode thread, and the click generator. */
-    void start();
+    /** Start playback from the current playhead (from 0 when stopped). */
+    void play();
 
-    /** Stop the Oboe stream and the decode thread. */
-    void stop();
-
-    /**
-     * Pause playback: saves the current file position, stops the Oboe stream,
-     * and stops the decode thread. Call resume() to continue.
-     */
+    /** Pause playback, freezing the playhead. */
     void pause();
 
-    /**
-     * Resume playback from the position saved by pause(). Rebuilds the Oboe
-     * stream, seeks the decoder, and restarts the decode thread.
-     */
+    /** Alias for play(); resumes from the frozen playhead. */
     void resume();
 
-    /**
-     * Stop playback and seek back to the beginning of the file, then restart.
-     */
+    /** Seek to positionMs, preserving the current play/pause state. */
+    void seekTo(int64_t positionMs);
+
+    /** Seek back to the start, preserving the current play/pause state. */
     void seekToStart();
 
-    /** Returns true if the Oboe stream is currently playing. */
+    /** Stop playback and reset the playhead to 0. Keeps the stream open. */
+    void stop();
+
+    /** True while actively playing (false when paused, stopped, or ended). */
     bool isPlaying();
 
-    /**
-     * Returns the total duration of the loaded audio file in milliseconds.
-     * Returns 0 if no file has been loaded or the format has no duration.
-     */
-    int64_t getDurationMs();
+    /** True once the file has played to its end. Cleared by seek/play/loadFile. */
+    bool isEnded();
 
-    /**
-     * Returns the current playback position in milliseconds, accounting for
-     * the accumulated pause offset and frames consumed since the last resume.
-     */
+    int64_t getDurationMs();
     int64_t getPositionMs();
 
     /**
-     * Seek to positionMs milliseconds from the start of the file. If playing,
-     * stops the engine, seeks, and restarts. If paused/stopped, only seeks.
+     * Position of the frame currently being heard at the speaker, in ms — the
+     * write playhead interpolated from the last callback's monotonic timestamp,
+     * minus the stream's output latency. Used to lock the visual beat to the
+     * audible click. Falls back to getPositionMs() when not playing.
      */
-    void seekTo(int64_t positionMs);
+    int64_t getAudiblePositionMs();
 
     void setBpm(double bpm);
     void setBeatsPerBar(int beatsPerBar);
     void setTrackVolume(float volume);
     void setClickVolume(float volume);
 
-    /**
-     * Set the absolute frame offset of the first beat in the audio file.
-     * Used by start(), resume(), and seekTo() to align the click track to the
-     * recording's natural beat grid.
-     */
+    /** Absolute frame of the first beat in the file (from analysis), at kSampleRate. */
     void setFirstBeatOffset(int64_t frames);
 
     // oboe::AudioStreamDataCallback
@@ -89,37 +88,40 @@ public:
                                           int32_t numFrames) override;
 
 private:
+    /** Open the persistent Oboe stream if not already open. Returns success. */
+    bool openStreamIfNeeded();
+
+    /** Stop the stream (kept open) and the decoder; optionally reset the playhead. */
+    void stopInternal(bool resetPosition);
+
     ClickGenerator mClickGenerator;
     FileDecoder    mFileDecoder;
 
     std::shared_ptr<oboe::AudioStream> mStream;
 
-    std::atomic<double> mBpm{120.0};
-    std::atomic<int>   mBeatsPerBar{4};
-    std::atomic<float> mTrackVolume{1.0f};
-    std::atomic<float> mClickVolume{1.0f};
-    std::atomic<bool>  mIsPlaying{false};
-    std::atomic<bool>  mFileLoaded{false};
-
-    // File position (in output frames) saved by pause() for use by resume().
-    uint64_t mPauseFrameOffset{0};
-
-    // Absolute frame position of the first beat in the audio file (from analysis).
-    // 0 means the click fires on the first rendered frame (default behaviour).
-    // Written on the main thread, read on the audio callback thread — must be atomic.
+    std::atomic<double>  mBpm{120.0};
+    std::atomic<int>     mBeatsPerBar{4};
+    std::atomic<float>   mTrackVolume{1.0f};
+    std::atomic<float>   mClickVolume{1.0f};
     std::atomic<int64_t> mFirstBeatOffset{0};
 
-    // Last values forwarded to mClickGenerator; 0 forces configure() on the
-    // first onAudioReady call.
-    double mLastBpm{0.0};
-    int mLastBeatsPerBar{0};
+    std::atomic<bool>    mIsPlaying{false};
+    std::atomic<bool>    mEnded{false};
+    std::atomic<bool>    mFileLoaded{false};
 
-    /**
-     * Compute how many frames until the next beat fires, given that playback
-     * is about to start from @p currentFrameOffset.
-     *
-     * If currentFrameOffset < mFirstBeatOffset the pre-roll is the distance
-     * to the first beat. Otherwise we phase into the beat grid.
-     */
-    int64_t computeFramesUntilBeat(int64_t currentFrameOffset, int streamRate) const;
+    // The single playhead, in kSampleRate frames. Advanced by the audio thread
+    // while playing; written by seek/stop only while the stream is stopped.
+    std::atomic<int64_t> mPositionFrames{0};
+
+    // Snapshot of (playhead, CLOCK_MONOTONIC nanos) taken at the end of each
+    // audio callback, so getAudiblePositionMs() can interpolate the playhead
+    // between callbacks. Written on the audio thread, read on the UI thread.
+    std::atomic<int64_t> mLastCbFrames{0};
+    std::atomic<int64_t> mLastCbNanos{0};
+
+    // Cached output latency (ms) and when it was last refreshed. UI thread only
+    // (getAudiblePositionMs is called from the Compose frame loop, serialized
+    // with the lifecycle methods on the main thread).
+    double  mCachedLatencyMs{0.0};
+    int64_t mLatencyStampNanos{0};
 };
