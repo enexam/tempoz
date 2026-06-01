@@ -123,6 +123,7 @@ Based on user review after Phase 1:
 - Configurable click sound, multiple options (kick, click, ping...)
 - Configurable accents/ghost notes (playing round notes to 16th)
 - Change BPM of a track (no pitch change)
+- Fractional BPM in the UI: the engine already plays fractional BPM (auto-detect sets e.g. 98.50 and plays it drift-free), but the display rounds to a whole number and the −/+ steppers + tap-tempo snap to integer — so the precision is hidden and destroyed on the first manual edit. Show decimals + a fine (±0.1) adjust. This is the real fix for the ~1.6-beat-per-song drift that integer rounding causes on a true-98.50 track like Fake Happy (confirmed by the playground DSP analysis: tempo is dead-constant, so a single fractional BPM tracks it the whole way).
 - Assisted first-beat alignment: a guided tool that plays the track up to the estimated first beat and asks the user "has the first beat happened yet?", narrowing `beatOffsetFrames` by binary search until the click locks onto the recording's downbeat. (Manual ms editing of the offset ships earlier, in the Track sheet.)
 - Tap-tempo phase lock: when setting BPM by tapping the Pulse Core, also align the beat-grid phase (`firstBeatOffset`) to the taps so the click syncs to the tapped downbeat, not just the tempo. (Tap-to-set-BPM ships earlier; phase alignment is the follow-up.)
 
@@ -130,5 +131,7 @@ Based on user review after Phase 1:
 
 - Battery optimization (if needed)
 - Color theme option (dark/light + accent color pick)
-- Prepare Google Play Store deployment (generate documentation, description, visuals)
-- Add About section describing the open-source nature of the software, form for bugs and feature requests
+- Remove the `BEAT n / N` readout under the Pulse Core — the ring's lit beat ticks already show the current beat, so the text is redundant.
+- Prepare Google Play Store deployment: documentation, description, visuals; **release signing** — generate an upload keystore and enrol in Play App Signing, add a `release` build type wired to the signing config with R8/minify, set real `versionCode`/`versionName`, and review the application id, `minSdk`/`targetSdk`, and the release permission set (a signed release AAB, not the debug-keystore APK CI builds today).
+- Add an **About menu** (model on `../checkpoint`'s `src/checkpoint/about.py`): shows the app name + **version** (from `versionName`), a one-line description, the open-source license, and the author **Maxence "Enexam" Beuselinck**; with buttons for the **GitHub repository** (`https://github.com/enexam/tempoz`), **Report a Bug**, and **Request a Feature** — the latter two opening a pre-filled GitHub new-issue URL (`/issues/new?title=…&body=…&labels=…`) with a `[Bug]`/`[Feature]` title, a body template carrying the app version + Android version/device, and `bug`/`enhancement` labels (cf. checkpoint's `build_issue_url`).
+- **Tag-driven version in CI**: on `v*.*.*` tags the release pipeline derives `versionName` (and bumps `versionCode`) from the git tag (strip the leading `v`) and injects it into the build, so the released artifact and the About screen's version always match the tag automatically — the Android/Gradle analogue of checkpoint's `release.yml` "Set version from tag" step.
