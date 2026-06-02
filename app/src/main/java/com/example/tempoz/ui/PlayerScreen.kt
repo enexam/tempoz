@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
@@ -84,6 +85,7 @@ fun PlayerScreen(
     val loopMode by viewModel.loopMode.collectAsState()
     val isAnalyzing by viewModel.isAnalyzing.collectAsState()
     val beatOffsetFrames by viewModel.beatOffsetFrames.collectAsState()
+    val settings by viewModel.settings.collectAsState()
 
     val hasTrack = fileUri != null
     val isPlaying = playbackState == PlaybackState.PLAYING
@@ -96,6 +98,7 @@ fun PlayerScreen(
     var showClick by remember { mutableStateOf(false) }
     var showMixer by remember { mutableStateOf(false) }
     var showSpeed by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     var isDragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
@@ -141,8 +144,8 @@ fun PlayerScreen(
                     color = scheme.onBackground,
                 )
             }
-            if (isAnalyzing) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isAnalyzing) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(14.dp),
                         strokeWidth = 2.dp,
@@ -153,6 +156,18 @@ fun PlayerScreen(
                         text = "analyzing",
                         style = MaterialTheme.typography.labelMedium,
                         color = scheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                IconButton(
+                    onClick = { showSettings = true },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Settings,
+                        contentDescription = "Settings",
+                        tint = scheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
                     )
                 }
             }
@@ -364,6 +379,14 @@ fun PlayerScreen(
             speed = playbackSpeed,
             onSpeedChange = { playbackSpeed = it },
             onDismiss = { showSpeed = false },
+        )
+    }
+    if (showSettings) {
+        SettingsSheet(
+            settings = settings,
+            onDefaultTrackVolumeChange = { viewModel.setDefaultTrackVolume(it) },
+            onDefaultClickVolumeChange = { viewModel.setDefaultClickVolume(it) },
+            onDismiss = { showSettings = false },
         )
     }
 }

@@ -8,12 +8,15 @@ import android.provider.OpenableColumns
 import java.io.FileNotFoundException
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.tempoz.data.AppSettings
+import com.example.tempoz.data.SettingsRepository
 import com.example.tempoz.data.TempozDatabase
 import com.example.tempoz.data.TrackEntity
 import com.example.tempoz.data.TrackRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,9 +39,22 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     private val engine = AudioEngine()
     private val repository = TrackRepository(TempozDatabase.getInstance(application).trackDao())
+    private val settingsRepository = SettingsRepository(application)
+
+    /** Global app settings, backed by DataStore. */
+    val settings: StateFlow<AppSettings> = settingsRepository.settings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppSettings())
 
     init {
         engine.create()
+        // Seed track/click volumes from persisted defaults (one-shot; reads the actual stored
+        // value, not the stateIn initial). This must use .first() — not settings.value — because
+        // the StateFlow's initial value is always the in-memory default until DataStore emits.
+        viewModelScope.launch {
+            val s = settingsRepository.settings.first()
+            setTrackVolume(s.defaultTrackVolume)
+            setClickVolume(s.defaultClickVolume)
+        }
         viewModelScope.launch {
             PlaybackController.actions.collect { action ->
                 when (action) {
@@ -281,6 +297,16 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     fun setClickVolume(value: Float) {
         clickVolume.value = value
         engine.clickVolume = value
+    }
+
+    /** Persists [value] as the default track volume for future sessions. */
+    fun setDefaultTrackVolume(value: Float) {
+        viewModelScope.launch { settingsRepository.setDefaultTrackVolume(value) }
+    }
+
+    /** Persists [value] as the default click volume for future sessions. */
+    fun setDefaultClickVolume(value: Float) {
+        viewModelScope.launch { settingsRepository.setDefaultClickVolume(value) }
     }
 
     /** Seeks to [positionMs] and updates [currentPositionMs] immediately. */
