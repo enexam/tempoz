@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.example.tempoz.quantizeBpm
+import kotlin.math.roundToLong
 
 /** Three-state playback machine exposed to the UI. */
 enum class PlaybackState { STOPPED, PLAYING, PAUSED }
@@ -389,10 +390,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * Registers a tap for tap-tempo: averages the interval over recent taps and sets [bpm].
-     * A gap longer than ~2 s starts a fresh measurement.
+     * A gap longer than ~2 s starts a fresh measurement. When PLAYING, also phase-locks the
+     * click grid so a beat lands on the tap: computes [phaseLockOffsetFrames] from the audible
+     * playhead and applies it via [setBeatOffsetFrames].
      */
     fun tapTempo() {
         val now = System.nanoTime()
+        // Capture the audible position as early as possible to minimise latency.
+        val audibleMs = audiblePositionMs()
         if (tapTimes.isNotEmpty() && now - tapTimes.last() > 2_000_000_000L) {
             tapTimes.clear()
         }
@@ -403,7 +408,12 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             if (intervalNs > 0.0) {
                 val tapped = 60_000_000_000.0 / intervalNs
                 if (tapped in 20.0..400.0) {
-                    setBpm(quantizeBpm(tapped))
+                    val newBpm = quantizeBpm(tapped)
+                    setBpm(newBpm)
+                    if (_playbackState.value == PlaybackState.PLAYING) {
+                        val offset = phaseLockOffsetFrames(audibleMs, speed.value, newBpm)
+                        if (offset != null) setBeatOffsetFrames(offset)
+                    }
                 }
             }
         }
@@ -530,4 +540,34 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         pollJob?.cancel()
         pollJob = null
     }
+}
+
+/**
+ * Computes the first-beat offset (source frames at 48 kHz) so that a beat onset
+ * lands on the tap position. This is the phase-lock step of tap-tempo.
+ *
+ * Formula:
+ *   outputFrame = audibleMs / 1000.0 * 48000.0
+ *   sourceFrame = round(outputFrame * speed)
+ *   interval    = BeatGrid.beatIntervalFrames(bpm, 48000)
+ *   offset      = ((sourceFrame % interval) + interval) % interval
+ *
+ * The double-modulo ensures a non-negative result. Source frames are used
+ * (rather than output frames) because [AudioEngine.setFirstBeatOffset] expects
+ * source-domain frames (task 6 invariant: firstBeatOffset is in source frames).
+ *
+ * Returns null if [bpm] is not finite or ≤ 0 (defensive guard; in practice bpm
+ * is always clamped to 40–240 by [quantizeBpm] before this function is called).
+ *
+ * @param audibleMs  latency-compensated playhead in milliseconds (from [AudioEngine.getAudiblePositionMs])
+ * @param speed      time-stretch factor (output→source scale)
+ * @param bpm        the just-set fractional BPM
+ */
+internal fun phaseLockOffsetFrames(audibleMs: Long, speed: Float, bpm: Double): Long? {
+    val interval = BeatGrid.beatIntervalFrames(bpm, 48000)
+    if (!interval.isFinite() || interval <= 0.0) return null
+    val outputFrame = audibleMs.toDouble() / 1000.0 * 48000.0
+    val sourceFrame = (outputFrame * speed).roundToLong()
+    val mod = sourceFrame % interval
+    return ((mod + interval) % interval).roundToLong()
 }
