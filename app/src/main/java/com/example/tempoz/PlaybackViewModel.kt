@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
+import com.example.tempoz.quantizeBpm
 
 /** Three-state playback machine exposed to the UI. */
 enum class PlaybackState { STOPPED, PLAYING, PAUSED }
@@ -341,7 +341,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             if (intervalNs > 0.0) {
                 val tapped = 60_000_000_000.0 / intervalNs
                 if (tapped in 20.0..400.0) {
-                    setBpm(tapped.roundToInt().coerceIn(40, 240).toDouble())
+                    setBpm(quantizeBpm(tapped))
                 }
             }
         }

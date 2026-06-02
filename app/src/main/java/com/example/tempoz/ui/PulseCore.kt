@@ -35,11 +35,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.tempoz.BeatGrid
+import com.example.tempoz.formatBpm
 import com.example.tempoz.ui.theme.TempozTheme
 import kotlinx.coroutines.isActive
 import kotlin.math.PI
 import kotlin.math.cos
-import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private const val SampleRate = 48000
@@ -190,7 +190,7 @@ fun PulseCore(
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = bpm.roundToInt().toString(),
+                    text = formatBpm(bpm),
                     style = MaterialTheme.typography.displayLarge,
                     color = scheme.onSurface,
                 )

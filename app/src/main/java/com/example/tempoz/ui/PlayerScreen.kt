@@ -61,7 +61,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.tempoz.PlaybackState
 import com.example.tempoz.PlaybackViewModel
-import kotlin.math.roundToInt
+import com.example.tempoz.formatBpm
+import com.example.tempoz.quantizeBpm
 
 private val ClickSoundOptions = listOf("Click", "Rim", "Wood block", "Beep", "Cowbell", "Hi-hat")
 
@@ -109,12 +110,12 @@ fun PlayerScreen(
 
     val scheme = MaterialTheme.colorScheme
 
-    fun nudgeBpm(delta: Int) {
-        viewModel.setBpm((bpm.roundToInt() + delta).coerceIn(40, 240).toDouble())
+    fun nudgeBpm(delta: Double) {
+        viewModel.setBpm(quantizeBpm(bpm + delta))
     }
 
     fun scaleBpm(factor: Double) {
-        viewModel.setBpm((bpm * factor).roundToInt().coerceIn(40, 240).toDouble())
+        viewModel.setBpm(quantizeBpm(bpm * factor))
     }
 
     Column(
@@ -187,7 +188,7 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                FilledTonalIconButton(onClick = { nudgeBpm(-1) }, modifier = Modifier.size(52.dp)) {
+                FilledTonalIconButton(onClick = { nudgeBpm(-1.0) }, modifier = Modifier.size(52.dp)) {
                     Icon(Icons.Rounded.Remove, contentDescription = "Slower")
                 }
                 PulseCore(
@@ -199,12 +200,28 @@ fun PlayerScreen(
                     onTap = { viewModel.tapTempo() },
                     ringSize = 196.dp,
                 )
-                FilledTonalIconButton(onClick = { nudgeBpm(+1) }, modifier = Modifier.size(52.dp)) {
+                FilledTonalIconButton(onClick = { nudgeBpm(+1.0) }, modifier = Modifier.size(52.dp)) {
                     Icon(Icons.Rounded.Add, contentDescription = "Faster")
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(8.dp))
+
+            // Fine ±0.1 BPM steppers.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(
+                    onClick = { nudgeBpm(-0.1) },
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.heightIn(min = 36.dp),
+                ) { Text("−0.1", style = MaterialTheme.typography.labelMedium) }
+                FilledTonalButton(
+                    onClick = { nudgeBpm(+0.1) },
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.heightIn(min = 36.dp),
+                ) { Text("+0.1", style = MaterialTheme.typography.labelMedium) }
+            }
+
+            Spacer(Modifier.height(8.dp))
 
             // Quick tempo ratios: half / dotted / dotted / double.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -228,7 +245,7 @@ fun PlayerScreen(
             Spacer(Modifier.height(4.dp))
             Text(
                 text = if (hasTrack) {
-                    "${bpm.roundToInt()} bpm · $beatsPerBar/4" +
+                    "${formatBpm(bpm)} bpm · $beatsPerBar/4" +
                         if (currentEntity?.detectedBpm != null) " · auto-detected" else ""
                 } else {
                     "Import a track to begin"

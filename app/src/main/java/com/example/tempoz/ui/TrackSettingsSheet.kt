@@ -4,10 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -15,6 +17,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -28,6 +31,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.tempoz.formatBpm
+import com.example.tempoz.quantizeBpm
 import kotlin.math.roundToInt
 
 // Output frames per millisecond at the engine's 48 kHz rate.
@@ -75,7 +80,7 @@ fun TrackSettingsSheet(
                 Text("TEMPO", style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "${bpm.roundToInt()} bpm",
+                    "${formatBpm(bpm)} bpm",
                     style = MaterialTheme.typography.titleMedium,
                     color = scheme.onSurface,
                 )
@@ -83,12 +88,12 @@ fun TrackSettingsSheet(
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 FilledTonalIconButton(
-                    onClick = { onBpmChange((bpm.roundToInt() - 1).coerceIn(40, 240).toDouble()) },
+                    onClick = { onBpmChange(quantizeBpm(bpm - 1.0)) },
                     modifier = Modifier.size(40.dp),
                 ) { Icon(Icons.Rounded.Remove, contentDescription = "Slower") }
                 Slider(
                     value = bpm.toFloat().coerceIn(40f, 240f),
-                    onValueChange = { onBpmChange(it.roundToInt().toDouble()) },
+                    onValueChange = { onBpmChange(quantizeBpm(it.toDouble())) },
                     valueRange = 40f..240f,
                     colors = SliderDefaults.colors(
                         thumbColor = scheme.primary,
@@ -100,9 +105,30 @@ fun TrackSettingsSheet(
                         .padding(horizontal = 8.dp),
                 )
                 FilledTonalIconButton(
-                    onClick = { onBpmChange((bpm.roundToInt() + 1).coerceIn(40, 240).toDouble()) },
+                    onClick = { onBpmChange(quantizeBpm(bpm + 1.0)) },
                     modifier = Modifier.size(40.dp),
                 ) { Icon(Icons.Rounded.Add, contentDescription = "Faster") }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Fine",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                FilledTonalButton(
+                    onClick = { onBpmChange(quantizeBpm(bpm - 0.1)) },
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.heightIn(min = 36.dp),
+                ) { Text("−0.1", style = MaterialTheme.typography.labelMedium) }
+                FilledTonalButton(
+                    onClick = { onBpmChange(quantizeBpm(bpm + 0.1)) },
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.heightIn(min = 36.dp),
+                ) { Text("+0.1", style = MaterialTheme.typography.labelMedium) }
             }
 
             Spacer(Modifier.height(20.dp))
@@ -178,7 +204,7 @@ fun TrackSettingsSheet(
                             Text("Auto-detected", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                "${detectedBpm.roundToInt()} bpm",
+                                "${formatBpm(detectedBpm)} bpm",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = scheme.onSurface,
                             )

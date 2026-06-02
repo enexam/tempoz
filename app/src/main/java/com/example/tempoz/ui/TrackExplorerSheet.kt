@@ -39,7 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.tempoz.data.TrackEntity
-import kotlin.math.roundToInt
+import com.example.tempoz.formatBpm
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -174,7 +174,7 @@ private fun TrackRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${track.bpm.roundToInt()} bpm · ${track.beatsPerBar}/4",
+                    "${formatBpm(track.bpm)} bpm · ${track.beatsPerBar}/4",
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onSurfaceVariant,
                 )
