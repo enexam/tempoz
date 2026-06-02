@@ -14,11 +14,20 @@
  *
  * Beat k (0-based, counted from firstBeatOffset) has onset frame
  *   onset(k) = firstBeatOffset + llround(k * beatIntervalFrames)
- * Beat 0 of each bar (k % beatsPerBar == 0) uses 880 Hz; all others 660 Hz.
- * Each click is a 30 ms sine burst with an exponential decay envelope.
+ * Beat 0 of each bar (k % beatsPerBar == 0) uses the accent frequency/gain;
+ * all others use the normal frequency/gain. Each click duration and shape
+ * depends on the selected voice (clickSound).
  *
  * The beat-grid math mirrors BeatGrid.kt, which carries the JVM unit tests.
  * Keep the two in lockstep.
+ *
+ * Click sound ids (must match ClickSoundOptions order in PlaybackViewModel.kt):
+ *   0 = Click     — sine burst, 880/660 Hz, 30 ms
+ *   1 = Rim       — bright sine, 1900/1500 Hz, 15 ms
+ *   2 = Wood block — multi-harmonic, 1100/850 Hz, 25 ms
+ *   3 = Beep      — clean sine, 1200/1000 Hz, 100 ms
+ *   4 = Cowbell   — dual detuned sines, 800+540 Hz, 60 ms
+ *   5 = Hi-hat    — deterministic noise burst, 35 ms
  */
 class ClickGenerator {
 public:
@@ -40,14 +49,10 @@ public:
      * @param firstBeatOffset absolute frame of the first beat (beat 0)
      * @param sampleRate      output sample rate in Hz (must be > 0)
      * @param gain            master gain applied to each click sample
+     * @param clickSound      voice selector (0–5, see class doc; clamped to valid range)
      */
     void render(float* out, int numFrames, int channels,
                 int64_t startFrame, double bpm, int beatsPerBar,
-                int64_t firstBeatOffset, int sampleRate, float gain) const;
-
-private:
-    static constexpr float kDecay = 80.0f;                  // envelope decay rate
-    static constexpr float kAccentFreq = 880.0f;            // beat 0 of each bar
-    static constexpr float kNormalFreq = 660.0f;            // every other beat
-    static constexpr float kClickDurationSeconds = 0.030f;  // 30 ms burst
+                int64_t firstBeatOffset, int sampleRate, float gain,
+                int clickSound) const;
 };

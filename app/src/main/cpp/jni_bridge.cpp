@@ -115,6 +115,12 @@ Java_com_example_tempoz_AudioEngine_nativeSetFirstBeatOffset(
     reinterpret_cast<AudioEngine*>(handle)->setFirstBeatOffset(static_cast<int64_t>(frames));
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeSetClickSound(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jint id) {
+    reinterpret_cast<AudioEngine*>(handle)->setClickSound(static_cast<int>(id));
+}
+
 JNIEXPORT jdoubleArray JNICALL
 Java_com_example_tempoz_AudioEngine_nativeAnalyzeBpm(
         JNIEnv* env, jobject /*thiz*/,

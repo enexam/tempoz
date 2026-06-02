@@ -59,12 +59,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.tempoz.ClickSoundOptions
 import com.example.tempoz.PlaybackState
 import com.example.tempoz.PlaybackViewModel
 import com.example.tempoz.formatBpm
 import com.example.tempoz.quantizeBpm
-
-private val ClickSoundOptions = listOf("Click", "Rim", "Wood block", "Beep", "Cowbell", "Hi-hat")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,7 +104,6 @@ fun PlayerScreen(
     var dragValue by remember { mutableFloatStateOf(0f) }
 
     // UI-only state for features without an audio backend yet.
-    var clickSound by rememberSaveable { mutableStateOf(ClickSoundOptions.first()) }
     var playbackSpeed by rememberSaveable { mutableFloatStateOf(1.0f) }
 
     val scheme = MaterialTheme.colorScheme
@@ -376,9 +374,9 @@ fun PlayerScreen(
     }
     if (showClick) {
         ClickSoundSheet(
-            selected = clickSound,
+            selected = settings.clickSound,
             options = ClickSoundOptions,
-            onSelect = { clickSound = it },
+            onSelect = { viewModel.setClickSound(it) },
             onDismiss = { showClick = false },
         )
     }

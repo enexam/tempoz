@@ -82,6 +82,13 @@ public:
     /** Absolute frame of the first beat in the file (from analysis), at kSampleRate. */
     void setFirstBeatOffset(int64_t frames);
 
+    /**
+     * Select the synthesized click voice (0–5, matching ClickSoundOptions order):
+     * 0=Click, 1=Rim, 2=Wood block, 3=Beep, 4=Cowbell, 5=Hi-hat.
+     * Applied atomically; takes effect on the next audio callback.
+     */
+    void setClickSound(int id);
+
     // oboe::AudioStreamDataCallback
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* oboeStream,
                                           void* audioData,
@@ -104,6 +111,8 @@ private:
     std::atomic<float>   mTrackVolume{1.0f};
     std::atomic<float>   mClickVolume{1.0f};
     std::atomic<int64_t> mFirstBeatOffset{0};
+
+    std::atomic<int>     mClickSound{0};
 
     std::atomic<bool>    mIsPlaying{false};
     std::atomic<bool>    mEnded{false};

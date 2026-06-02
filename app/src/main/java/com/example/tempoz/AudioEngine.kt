@@ -123,6 +123,16 @@ class AudioEngine {
             nativeSetClickVolume(handle, value)
         }
 
+    /**
+     * Click voice selector (0–5, matching ClickSoundOptions in PlaybackViewModel):
+     * 0=Click, 1=Rim, 2=Wood block, 3=Beep, 4=Cowbell, 5=Hi-hat.
+     */
+    var clickSound: Int = 0
+        set(value) {
+            field = value
+            nativeSetClickSound(handle, value)
+        }
+
     // ---- raw JNI declarations ----
 
     external fun nativeCreate(): Long
@@ -144,5 +154,6 @@ class AudioEngine {
     external fun nativeSetBeatsPerBar(handle: Long, beatsPerBar: Int)
     external fun nativeSetTrackVolume(handle: Long, volume: Float)
     external fun nativeSetClickVolume(handle: Long, volume: Float)
+    external fun nativeSetClickSound(handle: Long, id: Int)
     external fun nativeDestroy(handle: Long)
 }

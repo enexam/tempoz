@@ -74,12 +74,6 @@ fun ClickSoundSheet(
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
-            Text(
-                "Not wired to the audio engine yet — the click stays the same for now.",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-            )
         }
     }
 }

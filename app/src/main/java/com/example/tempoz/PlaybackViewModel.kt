@@ -29,6 +29,13 @@ import com.example.tempoz.quantizeBpm
 enum class PlaybackState { STOPPED, PLAYING, PAUSED }
 
 /**
+ * Ordered list of synthesized click voice names. The index is the id passed to
+ * the native engine (and stored in [AppSettings.clickSound]).
+ * Must stay in sync with the voice switch in ClickGenerator.cpp.
+ */
+val ClickSoundOptions = listOf("Click", "Rim", "Wood block", "Beep", "Cowbell", "Hi-hat")
+
+/**
  * ViewModel that owns the [AudioEngine] lifecycle and exposes playback state as [StateFlow]s.
  *
  * Call order for playback: pick a file via [selectFile], then call [play] / [pause] / [resume] /
@@ -54,6 +61,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             val s = settingsRepository.settings.first()
             setTrackVolume(s.defaultTrackVolume)
             setClickVolume(s.defaultClickVolume)
+            applyClickSoundToEngine(s.clickSound)
         }
         viewModelScope.launch {
             PlaybackController.actions.collect { action ->
@@ -307,6 +315,21 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     /** Persists [value] as the default click volume for future sessions. */
     fun setDefaultClickVolume(value: Float) {
         viewModelScope.launch { settingsRepository.setDefaultClickVolume(value) }
+    }
+
+    /**
+     * Sets the click voice by name (must be one of [ClickSoundOptions]), applies it
+     * to the engine live, and persists it as the global default.
+     */
+    fun setClickSound(name: String) {
+        applyClickSoundToEngine(name)
+        viewModelScope.launch { settingsRepository.setClickSound(name) }
+    }
+
+    /** Applies the click sound to the engine without persisting. */
+    private fun applyClickSoundToEngine(name: String) {
+        val id = ClickSoundOptions.indexOf(name).coerceAtLeast(0)
+        engine.clickSound = id
     }
 
     /** Seeks to [positionMs] and updates [currentPositionMs] immediately. */
