@@ -127,10 +127,15 @@ void AudioEngine::pause() {
 }
 
 void AudioEngine::seekTo(int64_t positionMs) {
-    int64_t frame = positionMs * kSampleRate / 1000;
-    if (frame < 0) frame = 0;
-    const int64_t durFrames = mFileDecoder.getDurationFrames();
-    if (durFrames > 0 && frame > durFrames) frame = durFrames;
+    // positionMs is in the OUTPUT timeline (what the listener hears).
+    // Convert to output frames, clamp to output duration.
+    const double s = static_cast<double>(mSpeed.load(std::memory_order_relaxed));
+    int64_t outFrame = positionMs * kSampleRate / 1000;
+    if (outFrame < 0) outFrame = 0;
+    const int64_t srcDurFrames = mFileDecoder.getDurationFrames();
+    const int64_t outDurFrames = (s > 0.0 && srcDurFrames > 0)
+            ? static_cast<int64_t>(static_cast<double>(srcDurFrames) / s) : srcDurFrames;
+    if (outDurFrames > 0 && outFrame > outDurFrames) outFrame = outDurFrames;
 
     const bool wasPlaying = mIsPlaying.load(std::memory_order_relaxed);
 
@@ -145,12 +150,12 @@ void AudioEngine::seekTo(int64_t positionMs) {
     // Cancel any active pre-roll; the seek position is the new playhead.
     mInCountIn.store(false, std::memory_order_relaxed);
     mEnded.store(false, std::memory_order_relaxed);
-    mPositionFrames.store(frame, std::memory_order_relaxed);
+    mPositionFrames.store(outFrame, std::memory_order_relaxed);
 
     if (wasPlaying) {
-        // Reseed the decoder at the new position (callback not running → FIFO
-        // mutation is safe) and resume the same open stream.
-        mFileDecoder.startAt(static_cast<uint64_t>(frame));
+        // Reseed the decoder at the output frame position. startAt() converts
+        // output→source internally (sourceFrame = outputFrame * speed).
+        mFileDecoder.startAt(static_cast<uint64_t>(outFrame));
         mIsPlaying.store(true, std::memory_order_relaxed);
         if (mStream) {
             oboe::Result result = mStream->start();
@@ -197,13 +202,22 @@ bool AudioEngine::isEnded() {
 }
 
 int64_t AudioEngine::getDurationMs() {
-    return mFileDecoder.getDurationFrames() * 1000LL / kSampleRate;
+    // Duration in the OUTPUT timeline (at the speaker) = sourceDuration / speed.
+    // mPositionFrames and the user-facing timeline are OUTPUT frames.
+    const double s = static_cast<double>(mSpeed.load(std::memory_order_relaxed));
+    const int64_t srcFrames = mFileDecoder.getDurationFrames();
+    if (s <= 0.0) return 0;
+    return static_cast<int64_t>(static_cast<double>(srcFrames) / s) * 1000LL / kSampleRate;
 }
 
 int64_t AudioEngine::getPositionMs() {
+    // mPositionFrames is in OUTPUT frames; clamp to the output duration.
     int64_t frames = mPositionFrames.load(std::memory_order_relaxed);
-    const int64_t durFrames = mFileDecoder.getDurationFrames();
-    if (durFrames > 0 && frames > durFrames) frames = durFrames;
+    const double s = static_cast<double>(mSpeed.load(std::memory_order_relaxed));
+    const int64_t srcFrames = mFileDecoder.getDurationFrames();
+    const int64_t outDurFrames = (s > 0.0)
+            ? static_cast<int64_t>(static_cast<double>(srcFrames) / s) : srcFrames;
+    if (outDurFrames > 0 && frames > outDurFrames) frames = outDurFrames;
     return frames * 1000LL / kSampleRate;
 }
 
@@ -238,9 +252,12 @@ int64_t AudioEngine::getAudiblePositionMs() {
     frames -= mCachedLatencyMs * static_cast<double>(kSampleRate) / 1000.0;
     if (frames < 0.0) frames = 0.0;
 
-    const int64_t durFrames = mFileDecoder.getDurationFrames();
-    if (durFrames > 0 && frames > static_cast<double>(durFrames)) {
-        frames = static_cast<double>(durFrames);
+    const double s = static_cast<double>(mSpeed.load(std::memory_order_relaxed));
+    const int64_t srcFrames = mFileDecoder.getDurationFrames();
+    const double outDurFrames = (s > 0.0)
+            ? static_cast<double>(srcFrames) / s : static_cast<double>(srcFrames);
+    if (outDurFrames > 0.0 && frames > outDurFrames) {
+        frames = outDurFrames;
     }
     return static_cast<int64_t>(frames * 1000.0 / static_cast<double>(kSampleRate));
 }
@@ -282,6 +299,44 @@ void AudioEngine::setCountInBars(int bars) {
     mCountInBars.store(bars, std::memory_order_relaxed);
 }
 
+void AudioEngine::setSpeed(float speed) {
+    if (speed < 0.5f) speed = 0.5f;
+    if (speed > 1.5f) speed = 1.5f;
+
+    // Remap the current output playhead to the same source position at the new
+    // speed before storing, so a live speed change doesn't jump the timeline.
+    // Unit model: outputFrame = sourceFrame / s  →  sourceFrame = outputFrame * s
+    //             newOutputFrame = sourceFrame / newS = outputFrame * oldS / newS
+    const float oldS = mSpeed.load(std::memory_order_relaxed);
+    const int64_t outFrameOld = mPositionFrames.load(std::memory_order_relaxed);
+    const int64_t outFrameNew = (speed > 0.0f && oldS > 0.0f)
+            ? std::llround(static_cast<double>(outFrameOld) * static_cast<double>(oldS)
+                           / static_cast<double>(speed))
+            : outFrameOld;
+
+    mSpeed.store(speed, std::memory_order_relaxed);
+    mFileDecoder.setSpeed(speed);
+    mPositionFrames.store(outFrameNew, std::memory_order_relaxed);
+
+    if (!mFileLoaded.load(std::memory_order_relaxed)) return;
+
+    const bool wasPlaying = mIsPlaying.load(std::memory_order_relaxed);
+    if (wasPlaying) {
+        // Stop-barrier so the audio callback is not accessing the FIFO.
+        mIsPlaying.store(false, std::memory_order_relaxed);
+        if (mStream) {
+            mStream->stop();
+        }
+        // Reseed the decoder at the new output frame (startAt converts to source
+        // internally), recreating the Sonic stream at the new speed.
+        mFileDecoder.startAt(static_cast<uint64_t>(outFrameNew));
+        mIsPlaying.store(true, std::memory_order_relaxed);
+        if (mStream) {
+            mStream->start();
+        }
+    }
+}
+
 void AudioEngine::startWithCountIn() {
     if (!mFileLoaded.load(std::memory_order_relaxed)) return;
     if (mIsPlaying.load(std::memory_order_relaxed)) return;
@@ -292,8 +347,12 @@ void AudioEngine::startWithCountIn() {
     const int bars = mCountInBars.load(std::memory_order_relaxed);
     if (bars > 0) {
         const double bpm = mBpm.load(std::memory_order_relaxed);
+        const float speed = mSpeed.load(std::memory_order_relaxed);
+        // Use effectiveBpm so the count-in pre-roll duration matches the
+        // stretched-track tempo and leads into the downbeat seamlessly.
+        const double effectiveBpm = bpm * static_cast<double>(speed);
         const int beatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
-        const double interval = static_cast<double>(kSampleRate) * 60.0 / bpm;
+        const double interval = static_cast<double>(kSampleRate) * 60.0 / effectiveBpm;
         const int64_t totalBeats = static_cast<int64_t>(bars) * beatsPerBar;
         const int64_t totalFrames = std::llround(static_cast<double>(totalBeats) * interval);
         mCountInTotalFrames.store(totalFrames, std::memory_order_relaxed);
@@ -349,6 +408,10 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
     // for the remainder of this block (zero-gap transition to frame 0).
     if (mInCountIn.load(std::memory_order_relaxed)) {
         const double bpm = mBpm.load(std::memory_order_relaxed);
+        const float speed = mSpeed.load(std::memory_order_relaxed);
+        // effectiveBpm accounts for the time-stretch so the count-in tempo
+        // matches the stretched track and leads in seamlessly.
+        const double effectiveBpm = bpm * static_cast<double>(speed);
         const int beatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
         const float clickVol = mClickVolume.load(std::memory_order_relaxed);
         const int clickSound = mClickSound.load(std::memory_order_relaxed);
@@ -368,8 +431,9 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
             // Reuse totalSamples-sized stack buffer (countInFrames <= numFrames).
             float clickBuf[totalSamples];
             std::memset(clickBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
+            // Use effectiveBpm so count-in tempo matches the stretched track.
             mClickGenerator.render(clickBuf, countInFrames, channels,
-                                   elapsed, bpm, beatsPerBar,
+                                   elapsed, effectiveBpm, beatsPerBar,
                                    /*firstBeatOffset=*/0, kSampleRate, 1.0f,
                                    clickSound, subdivision, ghostVolume);
             for (int i = 0; i < countInFrames * channels; ++i) {
@@ -391,7 +455,12 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
                 const int trailingSamples = trailingFrames * channels;
                 const int64_t startFrame = mPositionFrames.load(std::memory_order_relaxed);
                 const float trackVol = mTrackVolume.load(std::memory_order_relaxed);
+                // mFirstBeatOffset is in SOURCE frames; effectiveOffset is the
+                // corresponding position in the OUTPUT timeline (output = source / speed).
                 const int64_t firstBeat = mFirstBeatOffset.load(std::memory_order_relaxed);
+                const int64_t effectiveOffset = (speed > 0.0f)
+                        ? std::llround(static_cast<double>(firstBeat) / static_cast<double>(speed))
+                        : firstBeat;
                 float* trailingOut = output + countInFrames * channels;
 
                 float fileBuf[trailingSamples];
@@ -404,9 +473,11 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
                 }
 
                 std::memset(clickBuf2, 0, static_cast<size_t>(trailingSamples) * sizeof(float));
+                // Use effectiveBpm and effectiveOffset to lock the click to the
+                // stretched audio.
                 mClickGenerator.render(clickBuf2, trailingFrames, channels,
-                                       startFrame, bpm, beatsPerBar,
-                                       firstBeat, kSampleRate, 1.0f,
+                                       startFrame, effectiveBpm, beatsPerBar,
+                                       effectiveOffset, kSampleRate, 1.0f,
                                        clickSound, subdivision, ghostVolume);
 
                 for (int i = 0; i < trailingSamples; ++i) {
@@ -439,11 +510,20 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
     const float trackVol = mTrackVolume.load(std::memory_order_relaxed);
     const float clickVol = mClickVolume.load(std::memory_order_relaxed);
     const double bpm = mBpm.load(std::memory_order_relaxed);
+    const float speed = mSpeed.load(std::memory_order_relaxed);
     const int beatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
     const int64_t firstBeat = mFirstBeatOffset.load(std::memory_order_relaxed);
     const int clickSound = mClickSound.load(std::memory_order_relaxed);
     const int subdivision = mSubdivision.load(std::memory_order_relaxed);
     const float ghostVolume = mGhostVolume.load(std::memory_order_relaxed);
+
+    // Effective tempo and offset in the OUTPUT timeline.
+    // mFirstBeatOffset is stored in SOURCE frames; OUTPUT = SOURCE / speed.
+    // effectiveBpm = bpm * speed keeps the click locked to the stretched audio.
+    const double effectiveBpm = bpm * static_cast<double>(speed);
+    const int64_t effectiveOffset = (speed > 0.0f)
+            ? std::llround(static_cast<double>(firstBeat) / static_cast<double>(speed))
+            : firstBeat;
 
     float fileBuf[totalSamples];
     float clickBuf[totalSamples];
@@ -454,11 +534,13 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
         std::memset(fileBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
     }
 
-    // Click is a pure function of the absolute playhead, so it stays locked to
-    // the file's beat grid across seeks and pauses.
+    // Click is a pure function of the absolute output playhead, so it stays locked
+    // to the file's beat grid (in the output timeline) across seeks and pauses.
     std::memset(clickBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
-    mClickGenerator.render(clickBuf, numFrames, channels, startFrame, bpm, beatsPerBar,
-                           firstBeat, kSampleRate, 1.0f, clickSound, subdivision, ghostVolume);
+    mClickGenerator.render(clickBuf, numFrames, channels, startFrame,
+                           effectiveBpm, beatsPerBar,
+                           effectiveOffset, kSampleRate, 1.0f,
+                           clickSound, subdivision, ghostVolume);
 
     for (int i = 0; i < totalSamples; ++i) {
         output[i] = std::clamp(trackVol * fileBuf[i] + clickVol * clickBuf[i], -1.0f, 1.0f);

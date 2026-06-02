@@ -145,6 +145,12 @@ Java_com_example_tempoz_AudioEngine_nativeStartWithCountIn(
     reinterpret_cast<AudioEngine*>(handle)->startWithCountIn();
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeSetSpeed(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jfloat speed) {
+    reinterpret_cast<AudioEngine*>(handle)->setSpeed(static_cast<float>(speed));
+}
+
 JNIEXPORT jdoubleArray JNICALL
 Java_com_example_tempoz_AudioEngine_nativeAnalyzeBpm(
         JNIEnv* env, jobject /*thiz*/,

@@ -8,6 +8,10 @@
 #include <cstring>
 #include <cmath>
 
+extern "C" {
+#include "sonic.h"
+}
+
 #define LOG_TAG "FileDecoder"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -35,6 +39,10 @@ FileDecoder::~FileDecoder() {
         AMediaExtractor_delete(mExtractor);
         mExtractor = nullptr;
     }
+    if (mSonicStream) {
+        sonicDestroyStream(mSonicStream);
+        mSonicStream = nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +63,10 @@ bool FileDecoder::open(int fd, int64_t offset, int64_t length,
     if (mExtractor) {
         AMediaExtractor_delete(mExtractor);
         mExtractor = nullptr;
+    }
+    if (mSonicStream) {
+        sonicDestroyStream(mSonicStream);
+        mSonicStream = nullptr;
     }
     mStarted = false;
     mFifo.reset();
@@ -195,10 +207,31 @@ void FileDecoder::startAt(uint64_t frameOffset) {
     }
     if (!mCodec) return;
 
-    // Seek the extractor to the requested position.
+    // Unit conversion: frameOffset is in OUTPUT frames (after time-stretch).
+    // The extractor must seek to the corresponding SOURCE position.
+    //   sourceFrame = outputFrame * speed  (output = source / speed)
+    const float speed = mSpeed.load(std::memory_order_relaxed);
+    const uint64_t sourceOffset = static_cast<uint64_t>(
+            std::llround(static_cast<double>(frameOffset) * static_cast<double>(speed)));
+
+    // Seek the extractor to the corresponding source position.
     int64_t seekUs = static_cast<int64_t>(
-            static_cast<double>(frameOffset) * 1e6 / static_cast<double>(mTargetSampleRate));
+            static_cast<double>(sourceOffset) * 1e6 / static_cast<double>(mTargetSampleRate));
     AMediaExtractor_seekTo(mExtractor, seekUs, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
+
+    // Recreate (or flush) the Sonic stream so no stale stretched audio survives
+    // a seek/seed. We always recreate for simplicity; it is cheap and happens
+    // on the main thread (join barrier guarantees the decode thread is gone).
+    if (mSonicStream) {
+        sonicDestroyStream(mSonicStream);
+        mSonicStream = nullptr;
+    }
+    if (speed != 1.0f) {
+        mSonicStream = sonicCreateStream(mTargetSampleRate, mTargetChannels);
+        if (mSonicStream) {
+            sonicSetSpeed(mSonicStream, speed);
+        }
+    }
 
     // Bring the codec to a clean Executing state at the new position. If it is
     // not running yet (after open() or stop()) start it; otherwise flush.
@@ -241,6 +274,12 @@ uint64_t FileDecoder::getFramesConsumed() {
 
 int64_t FileDecoder::getDurationFrames() {
     return mDurationFrames;
+}
+
+void FileDecoder::setSpeed(float speed) {
+    if (speed < 0.5f) speed = 0.5f;
+    if (speed > 1.5f) speed = 1.5f;
+    mSpeed.store(speed, std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +362,70 @@ int FileDecoder::convertToFloat(const uint8_t* data, size_t byteSize,
         }
     }
     return numFrames;
+}
+
+// ---------------------------------------------------------------------------
+// emitFrames() — decode thread helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Route [numFrames] stereo 48 kHz frames through Sonic (if speed != 1.0) and
+ * then into the FIFO with back-pressure sleep.
+ *
+ * Unit model reminder:
+ *   - The FIFO holds OUTPUT frames (time-stretched at speed s).
+ *   - output frames = source frames / s.
+ *   - At speed == 1.0 we bypass Sonic completely (byte-equivalent).
+ *
+ * NOTE: The Sonic API counts frames, not interleaved samples. Each frame has
+ * mTargetChannels samples. Our buffers are already interleaved stereo.
+ */
+void FileDecoder::emitFrames(const float* frames, int numFrames) {
+    const float speed = mSpeed.load(std::memory_order_relaxed);
+
+    if (speed == 1.0f || !mSonicStream) {
+        // Bypass: write directly to FIFO with back-pressure.
+        int written = 0;
+        while (written < numFrames && !mStopRequested.load(std::memory_order_relaxed)) {
+            int32_t n = mFifo->write(frames + written * mTargetChannels,
+                                     numFrames - written);
+            written += n;
+            if (n == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(kFifoFullSleepMs));
+            }
+        }
+        return;
+    }
+
+    // Update Sonic speed if it changed since last call.
+    if (sonicGetSpeed(mSonicStream) != speed) {
+        sonicSetSpeed(mSonicStream, speed);
+    }
+
+    // Feed frames into Sonic. Write in one call; numSamples = frames * channels.
+    sonicWriteFloatToStream(mSonicStream, frames, numFrames);
+
+    // Drain all available stretched frames into the FIFO.
+    // mSonicDrainBuf is a decode-thread-only scratch vector.
+    static constexpr int kDrainBatch = 4096;
+    size_t needed = static_cast<size_t>(kDrainBatch * mTargetChannels);
+    if (mSonicDrainBuf.size() < needed) mSonicDrainBuf.resize(needed);
+
+    int got;
+    while ((got = sonicReadFloatFromStream(mSonicStream,
+                                           mSonicDrainBuf.data(), kDrainBatch)) > 0
+           && !mStopRequested.load(std::memory_order_relaxed)) {
+        // Write the drained batch to the FIFO with back-pressure retry.
+        int written = 0;
+        while (written < got && !mStopRequested.load(std::memory_order_relaxed)) {
+            int32_t n = mFifo->write(mSonicDrainBuf.data() + written * mTargetChannels,
+                                     got - written);
+            written += n;
+            if (n == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(kFifoFullSleepMs));
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -412,46 +515,31 @@ void FileDecoder::decodeLoop() {
                                           static_cast<size_t>(info.size),
                                           mPcmEncoding, inCh);
 
-            // 2. Resample (if needed) and upmix, then write to FIFO.
-            //    We process in chunks that fit mResampleBuf.
+            // 2. Resample (if needed) and upmix to target channels, then route
+            //    through emitFrames() which handles Sonic time-stretch + FIFO.
             //    mResamplePhase tracks the fractional input position.
 
             if (mInputSampleRate == mTargetSampleRate) {
                 // No resampling needed — just upmix if required.
                 if (inCh == outCh) {
-                    // Direct write in chunks (FIFO may be full, back-pressure).
-                    int written = 0;
-                    while (written < inFrames
-                           && !mStopRequested.load(std::memory_order_relaxed)) {
-                        int toWrite = inFrames - written;
-                        int32_t n = mFifo->write(
-                                mConvertBuf.data() + written * inCh, toWrite);
-                        written += n;
-                        if (n == 0) {
-                            std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(kFifoFullSleepMs));
-                        }
-                    }
+                    // Direct emit (no copy needed).
+                    emitFrames(mConvertBuf.data(), inFrames);
                 } else {
-                    // Mono → stereo upmix.
-                    int written = 0;
-                    while (written < inFrames
+                    // Mono → stereo upmix into mResampleBuf, then emit.
+                    int emitted = 0;
+                    while (emitted < inFrames
                            && !mStopRequested.load(std::memory_order_relaxed)) {
-                        int batch = std::min(inFrames - written, kInitialScratchFrames);
+                        int batch = std::min(inFrames - emitted, kInitialScratchFrames);
                         size_t needed = static_cast<size_t>(batch * outCh);
                         if (mResampleBuf.size() < needed) mResampleBuf.resize(needed);
                         for (int f = 0; f < batch; ++f) {
-                            float s = mConvertBuf[static_cast<size_t>((written + f) * inCh)];
+                            float s = mConvertBuf[static_cast<size_t>((emitted + f) * inCh)];
                             for (int c = 0; c < outCh; ++c) {
                                 mResampleBuf[static_cast<size_t>(f * outCh + c)] = s;
                             }
                         }
-                        int32_t n = mFifo->write(mResampleBuf.data(), batch);
-                        written += n;
-                        if (n == 0) {
-                            std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(kFifoFullSleepMs));
-                        }
+                        emitFrames(mResampleBuf.data(), batch);
+                        emitted += batch;
                     }
                 }
             } else {
@@ -487,9 +575,9 @@ void FileDecoder::decodeLoop() {
                     // Ensure resample buf has capacity for max(inCh, outCh) samples
                     // at writePos — the inner loop indexes up to writePos + inCh - 1.
                     size_t writePos = static_cast<size_t>(outFrameCount * outCh);
-                    size_t needed = writePos + static_cast<size_t>(std::max(inCh, outCh));
-                    if (needed > mResampleBuf.size()) {
-                        mResampleBuf.resize(mResampleBuf.size() * 2 + needed);
+                    size_t neededNow = writePos + static_cast<size_t>(std::max(inCh, outCh));
+                    if (neededNow > mResampleBuf.size()) {
+                        mResampleBuf.resize(mResampleBuf.size() * 2 + neededNow);
                     }
 
                     const int copyChannels = std::min(inCh, outCh);
@@ -525,20 +613,8 @@ void FileDecoder::decodeLoop() {
 
                     // Flush in batches to avoid unbounded buffering.
                     if (outFrameCount >= kInitialScratchFrames) {
-                        int written = 0;
-                        while (written < outFrameCount
-                               && !mStopRequested.load(std::memory_order_relaxed)) {
-                            int32_t n = mFifo->write(
-                                    mResampleBuf.data() + written * outCh,
-                                    outFrameCount - written);
-                            written += n;
-                            if (n == 0) {
-                                std::this_thread::sleep_for(
-                                        std::chrono::milliseconds(kFifoFullSleepMs));
-                            }
-                        }
+                        emitFrames(mResampleBuf.data(), outFrameCount);
                         outFrameCount = 0;
-                        // Shift resample buf write pointer back to 0.
                     }
                 }
 
@@ -554,14 +630,37 @@ void FileDecoder::decodeLoop() {
                 // the start of the *next* buffer.
                 mResamplePhase = phase - static_cast<double>(inFrames);
 
-                // Write any remaining resampled frames.
+                // Emit any remaining resampled frames.
                 if (outFrameCount > 0) {
+                    emitFrames(mResampleBuf.data(), outFrameCount);
+                }
+            }
+        }
+
+        AMediaCodec_releaseOutputBuffer(mCodec, static_cast<size_t>(outIdx), false);
+
+        if (isEOS && !mStopRequested.load(std::memory_order_relaxed)) {
+            // Source EOS: flush Sonic's internal latency buffer so the tail of
+            // the track reaches the FIFO before we mark mDecoderDone.
+            // isEOF() = mDecoderDone && FIFO-empty, so we must drain completely
+            // before setting the flag or the tail will be truncated.
+            if (mSonicStream) {
+                sonicFlushStream(mSonicStream);
+                // Drain all remaining stretched frames from Sonic into the FIFO.
+                static constexpr int kDrainBatch = 4096;
+                size_t needed = static_cast<size_t>(kDrainBatch * mTargetChannels);
+                if (mSonicDrainBuf.size() < needed) mSonicDrainBuf.resize(needed);
+                int got;
+                while ((got = sonicReadFloatFromStream(mSonicStream,
+                                                       mSonicDrainBuf.data(),
+                                                       kDrainBatch)) > 0
+                       && !mStopRequested.load(std::memory_order_relaxed)) {
                     int written = 0;
-                    while (written < outFrameCount
+                    while (written < got
                            && !mStopRequested.load(std::memory_order_relaxed)) {
                         int32_t n = mFifo->write(
-                                mResampleBuf.data() + written * outCh,
-                                outFrameCount - written);
+                                mSonicDrainBuf.data() + written * mTargetChannels,
+                                got - written);
                         written += n;
                         if (n == 0) {
                             std::this_thread::sleep_for(
@@ -570,12 +669,7 @@ void FileDecoder::decodeLoop() {
                     }
                 }
             }
-        }
-
-        AMediaCodec_releaseOutputBuffer(mCodec, static_cast<size_t>(outIdx), false);
-
-        if (isEOS) {
-            // All decoded data has been pushed to the FIFO.
+            // All decoded + stretched data has been pushed to the FIFO.
             mDecoderDone.store(true, std::memory_order_release);
             break;
         }

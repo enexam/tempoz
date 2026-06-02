@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.tempoz.formatBpm
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -27,6 +28,7 @@ private val SpeedPresets = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SpeedSheet(
+    bpm: Double,
     speed: Float,
     onSpeedChange: (Float) -> Unit,
     onDismiss: () -> Unit,
@@ -46,6 +48,16 @@ fun SpeedSheet(
                 text = formatSpeed(speed) + "×",
                 style = MaterialTheme.typography.displaySmall,
                 color = scheme.primary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(4.dp))
+
+            // Show the resulting effective BPM at this speed.
+            Text(
+                text = "${formatBpm(bpm * speed)} bpm",
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -76,13 +88,6 @@ fun SpeedSheet(
                     )
                 }
             }
-
-            Spacer(Modifier.height(18.dp))
-            Text(
-                "Not wired to the audio engine yet — playback speed is unchanged for now.",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-            )
         }
     }
 }

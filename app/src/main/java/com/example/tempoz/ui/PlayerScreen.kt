@@ -51,7 +51,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +85,7 @@ fun PlayerScreen(
     val isAnalyzing by viewModel.isAnalyzing.collectAsState()
     val beatOffsetFrames by viewModel.beatOffsetFrames.collectAsState()
     val settings by viewModel.settings.collectAsState()
+    val speed by viewModel.speed.collectAsState()
 
     val hasTrack = fileUri != null
     val isPlaying = playbackState == PlaybackState.PLAYING
@@ -102,9 +102,6 @@ fun PlayerScreen(
 
     var isDragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
-
-    // UI-only state for features without an audio backend yet.
-    var playbackSpeed by rememberSaveable { mutableFloatStateOf(1.0f) }
 
     val scheme = MaterialTheme.colorScheme
 
@@ -194,6 +191,7 @@ fun PlayerScreen(
                     beatsPerBar = beatsPerBar,
                     isPlaying = isPlaying,
                     firstBeatOffsetFrames = beatOffsetFrames,
+                    speed = speed,
                     audiblePositionMs = { viewModel.audiblePositionMs() },
                     onTap = { viewModel.tapTempo() },
                     ringSize = 196.dp,
@@ -391,8 +389,9 @@ fun PlayerScreen(
     }
     if (showSpeed) {
         SpeedSheet(
-            speed = playbackSpeed,
-            onSpeedChange = { playbackSpeed = it },
+            bpm = bpm,
+            speed = speed,
+            onSpeedChange = { viewModel.setSpeed(it) },
             onDismiss = { showSpeed = false },
         )
     }

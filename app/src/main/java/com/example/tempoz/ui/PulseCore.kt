@@ -51,8 +51,14 @@ private const val SampleRate = 48000
  * Each frame it reads [audiblePositionMs] (the latency-compensated playhead),
  * finds the current beat via [BeatGrid], and derives the bloom envelope purely
  * from time-since-onset — so the visual beat matches what you hear instead of
- * free-running and drifting. [bpm], [beatsPerBar] and [firstBeatOffsetFrames]
- * are read live, so edits apply on the next frame without restarting the bar.
+ * free-running and drifting. [bpm], [beatsPerBar], [firstBeatOffsetFrames], and
+ * [speed] are read live, so edits apply on the next frame without restarting
+ * the bar.
+ *
+ * The BeatGrid is computed with effectiveBpm = bpm * speed and
+ * effectiveOffset = firstBeatOffsetFrames / speed so the bloom stays aligned
+ * with the audible (time-stretched) click at s != 1.
+ *
  * Tapping the face calls [onTap] (tap-tempo).
  */
 @Composable
@@ -61,6 +67,7 @@ fun PulseCore(
     beatsPerBar: Int,
     isPlaying: Boolean,
     firstBeatOffsetFrames: Long,
+    speed: Float,
     audiblePositionMs: () -> Long,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
@@ -73,6 +80,7 @@ fun PulseCore(
     val currentBpm by rememberUpdatedState(bpm)
     val currentBeats by rememberUpdatedState(beatsPerBar)
     val currentOffset by rememberUpdatedState(firstBeatOffsetFrames)
+    val currentSpeed by rememberUpdatedState(speed)
     val positionProvider by rememberUpdatedState(audiblePositionMs)
 
     LaunchedEffect(isPlaying) {
@@ -83,19 +91,24 @@ fun PulseCore(
         }
         while (isActive) {
             withFrameNanos { }
-            val bpmNow = currentBpm.coerceAtLeast(1.0)
             val beatsNow = currentBeats.coerceAtLeast(1)
-            // Audible position → 48 kHz frame; the click grid is computed in the
-            // same units the engine uses, so the bloom lands on the heard click.
+            val s = currentSpeed.toDouble().coerceAtLeast(0.01)
+            // effectiveBpm = bpm * speed: the click plays at this tempo in the
+            // output timeline (what the listener hears after time-stretch).
+            val effectiveBpm = (currentBpm * s).coerceAtLeast(1.0)
+            // effectiveOffset = firstBeatOffsetFrames / speed: source frame offset
+            // converted to output frames so the BeatGrid aligns with the audio.
+            val effectiveOffset = Math.round(currentOffset / s)
+            // Audible position → 48 kHz output frame; BeatGrid uses output units.
             val frame = positionProvider() * (SampleRate / 1000)
-            val k = BeatGrid.beatIndexAt(frame, currentOffset, bpmNow, SampleRate)
+            val k = BeatGrid.beatIndexAt(frame, effectiveOffset, effectiveBpm, SampleRate)
             if (k < 0) {
                 pulse = 0f
                 beat = 0
             } else {
-                val onset = BeatGrid.beatOnsetFrame(k, currentOffset, bpmNow, SampleRate)
+                val onset = BeatGrid.beatOnsetFrame(k, effectiveOffset, effectiveBpm, SampleRate)
                 val sinceMs = (frame - onset).toDouble() / (SampleRate / 1000.0)
-                val decayMs = (60_000.0 / bpmNow * 0.5).coerceIn(90.0, 240.0)
+                val decayMs = (60_000.0 / effectiveBpm * 0.5).coerceIn(90.0, 240.0)
                 val env = 1.0 - (sinceMs / decayMs).coerceIn(0.0, 1.0)
                 pulse = (env * env).toFloat()
                 beat = (k % beatsNow).toInt() + 1
@@ -244,6 +257,7 @@ private fun PulseCorePreviewLight() {
                 beatsPerBar = 4,
                 isPlaying = false,
                 firstBeatOffsetFrames = 0L,
+                speed = 1.0f,
                 audiblePositionMs = { 0L },
                 onTap = {},
                 modifier = Modifier.width(320.dp),
@@ -262,6 +276,7 @@ private fun PulseCorePreviewDark() {
                 beatsPerBar = 4,
                 isPlaying = false,
                 firstBeatOffsetFrames = 0L,
+                speed = 1.0f,
                 audiblePositionMs = { 0L },
                 onTap = {},
                 modifier = Modifier.width(320.dp),

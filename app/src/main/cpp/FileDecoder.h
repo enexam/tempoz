@@ -11,6 +11,10 @@
 #include <media/NdkMediaExtractor.h>
 #include <oboe/FifoBuffer.h>
 
+extern "C" {
+#include "sonic.h"
+}
+
 /**
  * Decodes a compressed audio file via MediaCodec/MediaExtractor and feeds
  * float32 PCM into an oboe::FifoBuffer for lock-free consumption on the
@@ -70,9 +74,17 @@ public:
      * Also the seek primitive: call it with any frame position. Resets
      * mFramesConsumed to zero.
      *
-     * @param frameOffset target position in output frames (at targetSampleRate)
+     * frameOffset is in OUTPUT frames (after time-stretch). The extractor is
+     * seeked to the corresponding SOURCE position: sourceFrame = frameOffset * s.
      */
     void startAt(uint64_t frameOffset);
+
+    /**
+     * Set the time-stretch speed factor in [0.5, 1.5].
+     * At speed == 1.0 Sonic is bypassed entirely (byte-equivalent to old behavior).
+     * Safe to call from any thread; the decode thread reads it atomically.
+     */
+    void setSpeed(float speed);
 
     /** Signal the decode thread to stop, join it, and halt the codec. */
     void stop();
@@ -164,6 +176,8 @@ private:
     std::vector<float> mConvertBuf;
     // Float32 samples after resampling, before upmix write to fifo.
     std::vector<float> mResampleBuf;
+    // Float32 samples drained from Sonic before FIFO write.
+    std::vector<float> mSonicDrainBuf;
 
     // ---- linear resampler state (decode thread only) ----
     // Last frame of input (per input channel) kept for interpolation across
@@ -172,4 +186,25 @@ private:
     // Sub-sample position in [0, 1) — fractional distance into the current
     // input interval.
     double mResamplePhase = 0.0;
+
+    // ---- time-stretch (Sonic) ----
+    // Speed factor applied to the 48 kHz stereo stream before the FIFO.
+    // At 1.0 Sonic is bypassed (byte-equivalent). Written by setSpeed() from
+    // any thread; read by the decode thread each iteration.
+    std::atomic<float> mSpeed{1.0f};
+
+    // Sonic stream: created / recreated in startAt() on the decode-thread side
+    // (protected by the join barrier in startAt); destroyed in open() and ~.
+    // Null when speed == 1.0 or before the first startAt call.
+    sonicStream mSonicStream{nullptr};
+
+    /**
+     * Route stereo 48 kHz frames through Sonic (if speed != 1.0) then into
+     * the FIFO. Blocks (with sleep) while the FIFO is full. Respects
+     * mStopRequested. Decode thread only.
+     *
+     * @param frames   interleaved stereo float32 source pointer
+     * @param numFrames number of frames (each frame = 2 floats for stereo)
+     */
+    void emitFrames(const float* frames, int numFrames);
 };

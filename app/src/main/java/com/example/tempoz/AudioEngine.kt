@@ -169,6 +169,18 @@ class AudioEngine {
             nativeSetCountInBars(handle, value)
         }
 
+    /**
+     * Playback speed (time-stretch factor), clamped to [0.5, 1.5].
+     * At 1.0 no time-stretching is applied (byte-equivalent behavior).
+     * The click grid uses effectiveBpm = bpm * speed and
+     * effectiveOffset = firstBeatOffset / speed to stay locked to the audio.
+     */
+    var speed: Float = 1.0f
+        set(value) {
+            field = value
+            nativeSetSpeed(handle, value)
+        }
+
     // ---- raw JNI declarations ----
 
     external fun nativeCreate(): Long
@@ -195,5 +207,6 @@ class AudioEngine {
     external fun nativeSetGhostVolume(handle: Long, volume: Float)
     external fun nativeSetCountInBars(handle: Long, bars: Int)
     external fun nativeStartWithCountIn(handle: Long)
+    external fun nativeSetSpeed(handle: Long, speed: Float)
     external fun nativeDestroy(handle: Long)
 }

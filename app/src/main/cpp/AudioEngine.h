@@ -108,6 +108,15 @@ public:
     void setCountInBars(int bars);
 
     /**
+     * Set the playback speed factor, clamped to [0.5, 1.5].
+     * Forwards to FileDecoder for time-stretching the audio track.
+     * The click grid uses effectiveBpm = bpm·s and effectiveOffset = firstBeatOffset/s
+     * so the click stays locked to the stretched audio.
+     * A live change causes minor timeline reflow (acceptable per spec).
+     */
+    void setSpeed(float speed);
+
+    /**
      * Like play(), but prepends a count-in pre-roll if mCountInBars > 0.
      * The pre-roll renders N*beatsPerBar clicks at the current bpm/sig with
      * the file silent, then transitions seamlessly into normal playback at
@@ -144,6 +153,13 @@ private:
     std::atomic<float>   mGhostVolume{0.35f};
 
     std::atomic<int>     mCountInBars{0};
+
+    // Playback speed: the time-stretch factor applied to the decoded audio.
+    // The click grid uses effectiveBpm = mBpm * mSpeed and
+    // effectiveOffset = round(mFirstBeatOffset / mSpeed) so it stays locked
+    // to the stretched audio. mFirstBeatOffset is always stored in SOURCE frames.
+    // Clamped to [0.5, 1.5] by setSpeed().
+    std::atomic<float>   mSpeed{1.0f};
 
     // Count-in pre-roll state. Set/cleared on the main thread while the stream
     // is stopped (in startWithCountIn/pause/seekTo/stopInternal); read+written

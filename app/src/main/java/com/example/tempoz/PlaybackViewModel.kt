@@ -111,6 +111,12 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     val loopMode = MutableStateFlow(false)
 
+    /**
+     * Playback speed (time-stretch factor), clamped to [0.5, 1.5].
+     * Session-only: not persisted. Default 1.0 (no stretch).
+     */
+    val speed = MutableStateFlow(1.0f)
+
     /** Position + end-of-file polling loop (100 ms). Active only while PLAYING. */
     private var pollJob: Job? = null
 
@@ -406,6 +412,16 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     /** Toggles loop mode on/off. */
     fun toggleLoop() {
         loopMode.value = !loopMode.value
+    }
+
+    /**
+     * Sets the playback speed (time-stretch factor), clamped to [0.5, 1.5].
+     * Applies live to the engine; not persisted.
+     */
+    fun setSpeed(value: Float) {
+        val clamped = value.coerceIn(0.5f, 1.5f)
+        speed.value = clamped
+        engine.speed = clamped
     }
 
     /**
