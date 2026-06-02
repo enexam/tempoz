@@ -101,6 +101,21 @@ public:
      */
     void setGhostVolume(float volume);
 
+    /**
+     * Set the number of count-in bars before playback (0 = disabled).
+     * Applied atomically; used the next time startWithCountIn() is called.
+     */
+    void setCountInBars(int bars);
+
+    /**
+     * Like play(), but prepends a count-in pre-roll if mCountInBars > 0.
+     * The pre-roll renders N*beatsPerBar clicks at the current bpm/sig with
+     * the file silent, then transitions seamlessly into normal playback at
+     * mPositionFrames=0. One-shot: only this entry point arms count-in;
+     * resume()/seekTo(0)/loop (which calls seekTo(0)) never arm it.
+     */
+    void startWithCountIn();
+
     // oboe::AudioStreamDataCallback
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* oboeStream,
                                           void* audioData,
@@ -127,6 +142,16 @@ private:
     std::atomic<int>     mClickSound{0};
     std::atomic<int>     mSubdivision{1};
     std::atomic<float>   mGhostVolume{0.35f};
+
+    std::atomic<int>     mCountInBars{0};
+
+    // Count-in pre-roll state. Set/cleared on the main thread while the stream
+    // is stopped (in startWithCountIn/pause/seekTo/stopInternal); read+written
+    // by the audio thread while playing. mInCountIn gates the pre-roll branch in
+    // onAudioReady; mCountInElapsed counts frames through the pre-roll.
+    std::atomic<bool>    mInCountIn{false};
+    std::atomic<int64_t> mCountInTotalFrames{0};
+    std::atomic<int64_t> mCountInElapsed{0};
 
     std::atomic<bool>    mIsPlaying{false};
     std::atomic<bool>    mEnded{false};

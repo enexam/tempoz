@@ -41,6 +41,14 @@ class AudioEngine {
         nativeStart(handle)
     }
 
+    /**
+     * Like [start] but prepends a count-in pre-roll if [countInBars] > 0.
+     * Only call this on the STOPPED→PLAYING transition.
+     */
+    fun startWithCountIn() {
+        nativeStartWithCountIn(handle)
+    }
+
     fun stop() {
         nativeStop(handle)
     }
@@ -151,6 +159,16 @@ class AudioEngine {
             nativeSetGhostVolume(handle, value)
         }
 
+    /**
+     * Number of count-in bars to play before the file starts (0 = disabled).
+     * Only takes effect on the next [startWithCountIn] call.
+     */
+    var countInBars: Int = 0
+        set(value) {
+            field = value
+            nativeSetCountInBars(handle, value)
+        }
+
     // ---- raw JNI declarations ----
 
     external fun nativeCreate(): Long
@@ -175,5 +193,7 @@ class AudioEngine {
     external fun nativeSetClickSound(handle: Long, id: Int)
     external fun nativeSetSubdivision(handle: Long, subdivision: Int)
     external fun nativeSetGhostVolume(handle: Long, volume: Float)
+    external fun nativeSetCountInBars(handle: Long, bars: Int)
+    external fun nativeStartWithCountIn(handle: Long)
     external fun nativeDestroy(handle: Long)
 }

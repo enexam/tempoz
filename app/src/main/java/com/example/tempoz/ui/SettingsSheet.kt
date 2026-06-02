@@ -38,6 +38,8 @@ private val SubdivisionOptions = listOf(
     4 to "Sixteenth",
 )
 
+private val CountInOptions = listOf(0, 1, 2, 4)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(
@@ -46,6 +48,7 @@ fun SettingsSheet(
     onDefaultClickVolumeChange: (Float) -> Unit,
     onSubdivisionChange: (Int) -> Unit,
     onGhostVolumeChange: (Float) -> Unit,
+    onCountInBarsChange: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -107,6 +110,27 @@ fun SettingsSheet(
                 value = settings.ghostVolume,
                 onValueChange = onGhostVolumeChange,
             )
+
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(24.dp))
+
+            // ---- Count-in ----
+            Text(
+                text = "Count-in",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CountInOptions.forEach { bars ->
+                    FilterChip(
+                        selected = settings.countInBars == bars,
+                        onClick = { onCountInBarsChange(bars) },
+                        label = { Text(if (bars == 0) "Off" else "$bars bar${if (bars > 1) "s" else ""}") },
+                    )
+                }
+            }
 
             Spacer(Modifier.height(24.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

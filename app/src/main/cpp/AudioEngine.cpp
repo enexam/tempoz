@@ -118,6 +118,9 @@ void AudioEngine::pause() {
     if (mStream) {
         mStream->stop();
     }
+    // Cancel any active pre-roll: the next resume() will call play() which
+    // never arms count-in, so playback resumes at mPositionFrames=0 immediately.
+    mInCountIn.store(false, std::memory_order_relaxed);
     // Free the decode thread/codec; the playhead is left frozen where the audio
     // thread last advanced it.
     mFileDecoder.stop();
@@ -139,6 +142,8 @@ void AudioEngine::seekTo(int64_t positionMs) {
         }
     }
 
+    // Cancel any active pre-roll; the seek position is the new playhead.
+    mInCountIn.store(false, std::memory_order_relaxed);
     mEnded.store(false, std::memory_order_relaxed);
     mPositionFrames.store(frame, std::memory_order_relaxed);
 
@@ -175,6 +180,7 @@ void AudioEngine::stopInternal(bool resetPosition) {
     if (mStream) {
         mStream->stop();  // keep the stream open for reuse; just stop it
     }
+    mInCountIn.store(false, std::memory_order_relaxed);
     mFileDecoder.stop();
     mEnded.store(false, std::memory_order_relaxed);
     if (resetPosition) {
@@ -202,6 +208,10 @@ int64_t AudioEngine::getPositionMs() {
 }
 
 int64_t AudioEngine::getAudiblePositionMs() {
+    // During count-in the file position is fixed at 0; report it directly.
+    if (mInCountIn.load(std::memory_order_relaxed)) {
+        return 0;
+    }
     // When not actively playing the playhead is frozen; no interpolation.
     if (!mIsPlaying.load(std::memory_order_relaxed) || !mStream) {
         return getPositionMs();
@@ -267,6 +277,52 @@ void AudioEngine::setGhostVolume(float volume) {
     mGhostVolume.store(volume, std::memory_order_relaxed);
 }
 
+void AudioEngine::setCountInBars(int bars) {
+    if (bars < 0) bars = 0;
+    mCountInBars.store(bars, std::memory_order_relaxed);
+}
+
+void AudioEngine::startWithCountIn() {
+    if (!mFileLoaded.load(std::memory_order_relaxed)) return;
+    if (mIsPlaying.load(std::memory_order_relaxed)) return;
+    if (!openStreamIfNeeded()) return;
+
+    mEnded.store(false, std::memory_order_relaxed);
+
+    const int bars = mCountInBars.load(std::memory_order_relaxed);
+    if (bars > 0) {
+        const double bpm = mBpm.load(std::memory_order_relaxed);
+        const int beatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
+        const double interval = static_cast<double>(kSampleRate) * 60.0 / bpm;
+        const int64_t totalBeats = static_cast<int64_t>(bars) * beatsPerBar;
+        const int64_t totalFrames = std::llround(static_cast<double>(totalBeats) * interval);
+        mCountInTotalFrames.store(totalFrames, std::memory_order_relaxed);
+        mCountInElapsed.store(0, std::memory_order_relaxed);
+        mInCountIn.store(true, std::memory_order_relaxed);
+    } else {
+        mInCountIn.store(false, std::memory_order_relaxed);
+    }
+
+    // Seed the decoder at frame 0 so it is ready when the pre-roll ends (or
+    // immediately if there is no pre-roll). The FIFO is safe to touch: the
+    // stream is not started yet and the callback is not running.
+    mPositionFrames.store(0, std::memory_order_relaxed);
+    mFileDecoder.startAt(0);
+
+    mLastCbFrames.store(0, std::memory_order_relaxed);
+    mLastCbNanos.store(nowMonotonicNanos(), std::memory_order_relaxed);
+    mLatencyStampNanos = 0;
+
+    mIsPlaying.store(true, std::memory_order_relaxed);
+    oboe::Result result = mStream->start();
+    if (result != oboe::Result::OK) {
+        LOGE("startWithCountIn: stream start failed: %s", oboe::convertToText(result));
+        mIsPlaying.store(false, std::memory_order_relaxed);
+        mInCountIn.store(false, std::memory_order_relaxed);
+        mFileDecoder.stop();
+    }
+}
+
 oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStream*/,
                                                     void* audioData,
                                                     int32_t numFrames) {
@@ -282,6 +338,100 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
     // the FIFO single-consumer during a reseed.
     if (!playing) {
         std::memset(output, 0, static_cast<size_t>(totalSamples) * sizeof(float));
+        return oboe::DataCallbackResult::Continue;
+    }
+
+    // ---- Count-in pre-roll ----
+    // While mInCountIn is true, render the click as a pure function of the
+    // pre-roll counter (firstBeatOffset=0 so beat 0 lands immediately), keep
+    // the file silent, and do NOT advance mPositionFrames. When the counter
+    // runs out, clear the flag and fall through to the normal playback path
+    // for the remainder of this block (zero-gap transition to frame 0).
+    if (mInCountIn.load(std::memory_order_relaxed)) {
+        const double bpm = mBpm.load(std::memory_order_relaxed);
+        const int beatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
+        const float clickVol = mClickVolume.load(std::memory_order_relaxed);
+        const int clickSound = mClickSound.load(std::memory_order_relaxed);
+        const int subdivision = mSubdivision.load(std::memory_order_relaxed);
+        const float ghostVolume = mGhostVolume.load(std::memory_order_relaxed);
+        const int64_t elapsed = mCountInElapsed.load(std::memory_order_relaxed);
+        const int64_t total = mCountInTotalFrames.load(std::memory_order_relaxed);
+
+        // How many frames of this block still belong to the pre-roll.
+        const int64_t remaining = total - elapsed;
+        const int countInFrames = (remaining >= numFrames)
+                                  ? numFrames
+                                  : static_cast<int>(remaining < 0 ? 0 : remaining);
+
+        std::memset(output, 0, static_cast<size_t>(totalSamples) * sizeof(float));
+        if (countInFrames > 0) {
+            // Reuse totalSamples-sized stack buffer (countInFrames <= numFrames).
+            float clickBuf[totalSamples];
+            std::memset(clickBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
+            mClickGenerator.render(clickBuf, countInFrames, channels,
+                                   elapsed, bpm, beatsPerBar,
+                                   /*firstBeatOffset=*/0, kSampleRate, 1.0f,
+                                   clickSound, subdivision, ghostVolume);
+            for (int i = 0; i < countInFrames * channels; ++i) {
+                output[i] = std::clamp(clickVol * clickBuf[i], -1.0f, 1.0f);
+            }
+        }
+
+        const int64_t newElapsed = elapsed + countInFrames;
+        mCountInElapsed.store(newElapsed, std::memory_order_relaxed);
+
+        if (newElapsed >= total) {
+            // Pre-roll complete. Clear the flag and render the trailing frames of
+            // this block (frames after the count-in portion) as normal playback so
+            // the downbeat starts in the same callback — zero-gap, sample-accurate.
+            mInCountIn.store(false, std::memory_order_relaxed);
+
+            const int trailingFrames = numFrames - countInFrames;
+            if (trailingFrames > 0) {
+                const int trailingSamples = trailingFrames * channels;
+                const int64_t startFrame = mPositionFrames.load(std::memory_order_relaxed);
+                const float trackVol = mTrackVolume.load(std::memory_order_relaxed);
+                const int64_t firstBeat = mFirstBeatOffset.load(std::memory_order_relaxed);
+                float* trailingOut = output + countInFrames * channels;
+
+                float fileBuf[trailingSamples];
+                float clickBuf2[trailingSamples];
+
+                if (mFileLoaded.load(std::memory_order_relaxed)) {
+                    mFileDecoder.read(fileBuf, trailingFrames);
+                } else {
+                    std::memset(fileBuf, 0, static_cast<size_t>(trailingSamples) * sizeof(float));
+                }
+
+                std::memset(clickBuf2, 0, static_cast<size_t>(trailingSamples) * sizeof(float));
+                mClickGenerator.render(clickBuf2, trailingFrames, channels,
+                                       startFrame, bpm, beatsPerBar,
+                                       firstBeat, kSampleRate, 1.0f,
+                                       clickSound, subdivision, ghostVolume);
+
+                for (int i = 0; i < trailingSamples; ++i) {
+                    trailingOut[i] = std::clamp(trackVol * fileBuf[i] + clickVol * clickBuf2[i],
+                                                -1.0f, 1.0f);
+                }
+
+                const int64_t newPos = startFrame + trailingFrames;
+                mPositionFrames.store(newPos, std::memory_order_relaxed);
+                mLastCbFrames.store(newPos, std::memory_order_relaxed);
+                mLastCbNanos.store(nowMonotonicNanos(), std::memory_order_relaxed);
+                if (mFileLoaded.load(std::memory_order_relaxed) && mFileDecoder.isEOF()) {
+                    mEnded.store(true, std::memory_order_relaxed);
+                }
+            } else {
+                mLastCbFrames.store(mPositionFrames.load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
+                mLastCbNanos.store(nowMonotonicNanos(), std::memory_order_relaxed);
+            }
+        } else {
+            mLastCbFrames.store(mPositionFrames.load(std::memory_order_relaxed),
+                                std::memory_order_relaxed);
+            mLastCbNanos.store(nowMonotonicNanos(), std::memory_order_relaxed);
+        }
+
         return oboe::DataCallbackResult::Continue;
     }
 

@@ -133,6 +133,18 @@ Java_com_example_tempoz_AudioEngine_nativeSetGhostVolume(
     reinterpret_cast<AudioEngine*>(handle)->setGhostVolume(static_cast<float>(volume));
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeSetCountInBars(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jint bars) {
+    reinterpret_cast<AudioEngine*>(handle)->setCountInBars(static_cast<int>(bars));
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeStartWithCountIn(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    reinterpret_cast<AudioEngine*>(handle)->startWithCountIn();
+}
+
 JNIEXPORT jdoubleArray JNICALL
 Java_com_example_tempoz_AudioEngine_nativeAnalyzeBpm(
         JNIEnv* env, jobject /*thiz*/,

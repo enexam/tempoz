@@ -403,6 +403,7 @@ fun PlayerScreen(
             onDefaultClickVolumeChange = { viewModel.setDefaultClickVolume(it) },
             onSubdivisionChange = { viewModel.setSubdivision(it) },
             onGhostVolumeChange = { viewModel.setGhostVolume(it) },
+            onCountInBarsChange = { viewModel.setCountInBars(it) },
             onDismiss = { showSettings = false },
         )
     }

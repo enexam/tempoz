@@ -64,6 +64,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             applyClickSoundToEngine(s.clickSound)
             engine.subdivision = s.subdivision
             engine.ghostVolume = s.ghostVolume
+            engine.countInBars = s.countInBars
         }
         viewModelScope.launch {
             PlaybackController.actions.collect { action ->
@@ -232,7 +233,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         if (_playbackState.value != PlaybackState.STOPPED) return
         engine.bpm = bpm.value
         engine.beatsPerBar = beatsPerBar.value
-        engine.start()
+        // startWithCountIn() arms the pre-roll if countInBars > 0; only call it
+        // here (STOPPED→PLAYING). resume()/restart()/loop all use engine.resume()
+        // or engine.seekTo(0) and must NOT trigger count-in.
+        engine.startWithCountIn()
         _playbackState.value = PlaybackState.PLAYING
         updateNotification()
         launchPollJob()
@@ -350,6 +354,15 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     fun setGhostVolume(value: Float) {
         engine.ghostVolume = value
         viewModelScope.launch { settingsRepository.setGhostVolume(value) }
+    }
+
+    /**
+     * Sets the number of count-in bars (0–4), applies it to the engine live,
+     * and persists it. Takes effect on the next play-from-stopped.
+     */
+    fun setCountInBars(value: Int) {
+        engine.countInBars = value
+        viewModelScope.launch { settingsRepository.setCountInBars(value) }
     }
 
     /** Seeks to [positionMs] and updates [currentPositionMs] immediately. */
