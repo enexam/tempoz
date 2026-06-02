@@ -401,6 +401,8 @@ fun PlayerScreen(
             settings = settings,
             onDefaultTrackVolumeChange = { viewModel.setDefaultTrackVolume(it) },
             onDefaultClickVolumeChange = { viewModel.setDefaultClickVolume(it) },
+            onSubdivisionChange = { viewModel.setSubdivision(it) },
+            onGhostVolumeChange = { viewModel.setGhostVolume(it) },
             onDismiss = { showSettings = false },
         )
     }

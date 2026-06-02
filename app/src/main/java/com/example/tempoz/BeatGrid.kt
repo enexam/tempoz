@@ -47,4 +47,27 @@ object BeatGrid {
 
     /** True if beat [k] is the accented downbeat of its bar. */
     fun isAccent(k: Long, beatsPerBar: Int): Boolean = (k % beatsPerBar) == 0L
+
+    /**
+     * Absolute onset frame of sub-beat [j] within beat [k], where [j] ∈ 1..[subdivision]-1.
+     *
+     * Formula: beatOnset(k) + round(j * interval / subdivision).
+     *
+     * This is a **two-step** rounding: beat onset is already rounded via [beatOnsetFrame],
+     * and the sub-beat offset is rounded independently. Do NOT collapse to
+     * round((k + j/S) * interval) — that produces different values for fractional BPM.
+     *
+     * Mirrors the C++ ClickGenerator sub-onset math (keep in lockstep).
+     *
+     * @param k             beat index (0-based from [firstBeatOffset])
+     * @param j             sub-beat index within the beat, 1 ≤ j < [subdivision]
+     * @param subdivision   number of subdivisions per beat (1=quarter/none, 2=eighth, 3=triplet,
+     *                      4=sixteenth)
+     */
+    fun subOnsetFrame(k: Long, j: Int, firstBeatOffset: Long, bpm: Double, sampleRate: Int,
+                      subdivision: Int): Long {
+        val interval = beatIntervalFrames(bpm, sampleRate)
+        val beatOnset = beatOnsetFrame(k, firstBeatOffset, bpm, sampleRate)
+        return beatOnset + (j.toDouble() * interval / subdivision.toDouble()).roundToLong()
+    }
 }

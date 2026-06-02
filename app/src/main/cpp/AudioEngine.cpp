@@ -259,6 +259,14 @@ void AudioEngine::setClickSound(int id) {
     mClickSound.store(id, std::memory_order_relaxed);
 }
 
+void AudioEngine::setSubdivision(int subdivision) {
+    mSubdivision.store(subdivision, std::memory_order_relaxed);
+}
+
+void AudioEngine::setGhostVolume(float volume) {
+    mGhostVolume.store(volume, std::memory_order_relaxed);
+}
+
 oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStream*/,
                                                     void* audioData,
                                                     int32_t numFrames) {
@@ -284,6 +292,8 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
     const int beatsPerBar = mBeatsPerBar.load(std::memory_order_relaxed);
     const int64_t firstBeat = mFirstBeatOffset.load(std::memory_order_relaxed);
     const int clickSound = mClickSound.load(std::memory_order_relaxed);
+    const int subdivision = mSubdivision.load(std::memory_order_relaxed);
+    const float ghostVolume = mGhostVolume.load(std::memory_order_relaxed);
 
     float fileBuf[totalSamples];
     float clickBuf[totalSamples];
@@ -298,7 +308,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream* /*oboeStre
     // the file's beat grid across seeks and pauses.
     std::memset(clickBuf, 0, static_cast<size_t>(totalSamples) * sizeof(float));
     mClickGenerator.render(clickBuf, numFrames, channels, startFrame, bpm, beatsPerBar,
-                           firstBeat, kSampleRate, 1.0f, clickSound);
+                           firstBeat, kSampleRate, 1.0f, clickSound, subdivision, ghostVolume);
 
     for (int i = 0; i < totalSamples; ++i) {
         output[i] = std::clamp(trackVol * fileBuf[i] + clickVol * clickBuf[i], -1.0f, 1.0f);

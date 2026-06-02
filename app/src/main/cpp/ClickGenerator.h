@@ -50,9 +50,15 @@ public:
      * @param sampleRate      output sample rate in Hz (must be > 0)
      * @param gain            master gain applied to each click sample
      * @param clickSound      voice selector (0–5, see class doc; clamped to valid range)
+     * @param subdivision     number of subdivisions per beat: 1=quarter (no sub-beats),
+     *                        2=eighth, 3=triplet, 4=sixteenth. Values outside [1,4] are
+     *                        clamped to 1.
+     * @param ghostVolume     relative gain of ghost (sub-beat) clicks in [0,1].
+     *                        Applied on top of [gain]. Ghost clicks use [normalFreq] and
+     *                        a shorter duration than the main beat click.
      */
     void render(float* out, int numFrames, int channels,
                 int64_t startFrame, double bpm, int beatsPerBar,
                 int64_t firstBeatOffset, int sampleRate, float gain,
-                int clickSound) const;
+                int clickSound, int subdivision, float ghostVolume) const;
 };

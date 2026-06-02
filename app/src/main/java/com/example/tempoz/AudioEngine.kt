@@ -133,6 +133,24 @@ class AudioEngine {
             nativeSetClickSound(handle, value)
         }
 
+    /**
+     * Subdivision: 1=quarter (no ghost beats), 2=eighth, 3=triplet, 4=sixteenth.
+     */
+    var subdivision: Int = 1
+        set(value) {
+            field = value
+            nativeSetSubdivision(handle, value)
+        }
+
+    /**
+     * Relative gain of ghost (sub-beat) clicks vs. main-beat clicks, in [0, 1].
+     */
+    var ghostVolume: Float = 0.35f
+        set(value) {
+            field = value
+            nativeSetGhostVolume(handle, value)
+        }
+
     // ---- raw JNI declarations ----
 
     external fun nativeCreate(): Long
@@ -155,5 +173,7 @@ class AudioEngine {
     external fun nativeSetTrackVolume(handle: Long, volume: Float)
     external fun nativeSetClickVolume(handle: Long, volume: Float)
     external fun nativeSetClickSound(handle: Long, id: Int)
+    external fun nativeSetSubdivision(handle: Long, subdivision: Int)
+    external fun nativeSetGhostVolume(handle: Long, volume: Float)
     external fun nativeDestroy(handle: Long)
 }

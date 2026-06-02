@@ -1,6 +1,8 @@
 package com.example.tempoz.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,12 +31,21 @@ import com.example.tempoz.BuildConfig
 import com.example.tempoz.data.AppSettings
 import kotlin.math.roundToInt
 
+private val SubdivisionOptions = listOf(
+    1 to "Quarter",
+    2 to "Eighth",
+    3 to "Triplet",
+    4 to "Sixteenth",
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(
     settings: AppSettings,
     onDefaultTrackVolumeChange: (Float) -> Unit,
     onDefaultClickVolumeChange: (Float) -> Unit,
+    onSubdivisionChange: (Int) -> Unit,
+    onGhostVolumeChange: (Float) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -66,6 +78,34 @@ fun SettingsSheet(
                 label = "Click",
                 value = settings.defaultClickVolume,
                 onValueChange = onDefaultClickVolumeChange,
+            )
+
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(24.dp))
+
+            // ---- Subdivision ----
+            Text(
+                text = "Subdivision",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SubdivisionOptions.forEach { (value, label) ->
+                    FilterChip(
+                        selected = settings.subdivision == value,
+                        onClick = { onSubdivisionChange(value) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            SettingsVolumeRow(
+                icon = Icons.Rounded.GraphicEq,
+                label = "Ghost volume",
+                value = settings.ghostVolume,
+                onValueChange = onGhostVolumeChange,
             )
 
             Spacer(Modifier.height(24.dp))

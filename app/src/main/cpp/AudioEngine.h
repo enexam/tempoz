@@ -89,6 +89,18 @@ public:
      */
     void setClickSound(int id);
 
+    /**
+     * Set the subdivision (1=quarter/off, 2=eighth, 3=triplet, 4=sixteenth).
+     * Applied atomically; takes effect on the next audio callback.
+     */
+    void setSubdivision(int subdivision);
+
+    /**
+     * Set the relative gain of ghost (sub-beat) clicks in [0, 1].
+     * Applied atomically; takes effect on the next audio callback.
+     */
+    void setGhostVolume(float volume);
+
     // oboe::AudioStreamDataCallback
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* oboeStream,
                                           void* audioData,
@@ -113,6 +125,8 @@ private:
     std::atomic<int64_t> mFirstBeatOffset{0};
 
     std::atomic<int>     mClickSound{0};
+    std::atomic<int>     mSubdivision{1};
+    std::atomic<float>   mGhostVolume{0.35f};
 
     std::atomic<bool>    mIsPlaying{false};
     std::atomic<bool>    mEnded{false};

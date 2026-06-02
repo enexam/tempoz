@@ -62,6 +62,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             setTrackVolume(s.defaultTrackVolume)
             setClickVolume(s.defaultClickVolume)
             applyClickSoundToEngine(s.clickSound)
+            engine.subdivision = s.subdivision
+            engine.ghostVolume = s.ghostVolume
         }
         viewModelScope.launch {
             PlaybackController.actions.collect { action ->
@@ -330,6 +332,24 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private fun applyClickSoundToEngine(name: String) {
         val id = ClickSoundOptions.indexOf(name).coerceAtLeast(0)
         engine.clickSound = id
+    }
+
+    /**
+     * Sets the subdivision (1=quarter/none, 2=eighth, 3=triplet, 4=sixteenth),
+     * applies it to the engine live, and persists it.
+     */
+    fun setSubdivision(value: Int) {
+        engine.subdivision = value
+        viewModelScope.launch { settingsRepository.setSubdivision(value) }
+    }
+
+    /**
+     * Sets the relative ghost (sub-beat) click volume in [0, 1],
+     * applies it to the engine live, and persists it.
+     */
+    fun setGhostVolume(value: Float) {
+        engine.ghostVolume = value
+        viewModelScope.launch { settingsRepository.setGhostVolume(value) }
     }
 
     /** Seeks to [positionMs] and updates [currentPositionMs] immediately. */

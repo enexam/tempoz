@@ -121,6 +121,18 @@ Java_com_example_tempoz_AudioEngine_nativeSetClickSound(
     reinterpret_cast<AudioEngine*>(handle)->setClickSound(static_cast<int>(id));
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeSetSubdivision(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jint subdivision) {
+    reinterpret_cast<AudioEngine*>(handle)->setSubdivision(static_cast<int>(subdivision));
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_tempoz_AudioEngine_nativeSetGhostVolume(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jfloat volume) {
+    reinterpret_cast<AudioEngine*>(handle)->setGhostVolume(static_cast<float>(volume));
+}
+
 JNIEXPORT jdoubleArray JNICALL
 Java_com_example_tempoz_AudioEngine_nativeAnalyzeBpm(
         JNIEnv* env, jobject /*thiz*/,
