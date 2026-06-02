@@ -38,7 +38,7 @@ private val SubdivisionOptions = listOf(
     4 to "Sixteenth",
 )
 
-private val CountInOptions = listOf(0, 1, 2, 4)
+private val CountInOptions = listOf(0, 1, 2, 3, 4)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
